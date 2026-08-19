@@ -97,7 +97,7 @@ body{font-size:14px;line-height:1.5;text-rendering:optimizeLegibility;-webkit-fo
 button,input,select,textarea{font:inherit}
 button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--purple-bright);outline-offset:3px}
 button:disabled{cursor:not-allowed}
-.primary-button:disabled,.secondary-button:disabled,.passkey-button:disabled{opacity:.68;filter:saturate(.72);transform:none;box-shadow:none}
+.primary-button:disabled{opacity:.82;filter:saturate(.68);transform:none;box-shadow:none}.secondary-button:disabled,.passkey-button:disabled{opacity:.72;filter:saturate(.72);transform:none;box-shadow:none}
 .search-box,.icon-button,.notion-link,.date-sort select,.filter-tabs,.save-button,.load-more-button,.resume-open,.reveal-button,.modal-close,.auth-form input,.connection-form input,.discovery-form input,.discovery-form select,.discovery-form textarea,.session-timeout-form select,.editor-form input,.editor-form select,.editor-form textarea,.credential-form input,.document-select select,.provider-form input,.provider-form select{border-color:var(--control-border)}
 .icon-button,.save-button,.resume-open,.reveal-button,.modal-close{color:var(--ink)}
 .icon-button:hover,.save-button:hover,.resume-open:hover,.reveal-button:hover,.modal-close:hover{border-color:var(--purple-bright);background:rgba(155,124,255,.1);color:var(--purple-bright)}
