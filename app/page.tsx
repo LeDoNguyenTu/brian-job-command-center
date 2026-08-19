@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 const FALLBACK_NOTION_HUB =
@@ -217,6 +218,24 @@ function relativeFound(date: string | null) {
   if (days === 0) return "Today";
   if (days === 1) return "Yesterday";
   return new Intl.DateTimeFormat("en-SG", { day: "numeric", month: "short" }).format(value);
+}
+
+function feedDateLabel(date: string | null) {
+  if (!date) return "Date not recorded";
+  return new Intl.DateTimeFormat("en-SG", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(`${date}T00:00:00`));
+}
+
+function BrandLogo({ priority = false }: { priority?: boolean }) {
+  return (
+    <span className="brand-mark" aria-hidden="true">
+      <Image src="/brian-logo.png" alt="" width={160} height={160} priority={priority} />
+    </span>
+  );
 }
 
 function mapJob(row: JobRow): Job {
@@ -475,7 +494,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
     <main className="auth-shell">
       <div className="auth-aurora auth-aurora-one" /><div className="auth-aurora auth-aurora-two" />
       <section className="auth-card" aria-labelledby="auth-title">
-        <div className="auth-brand"><span className="brand-mark">B</span><div><strong>BRIAN</strong><small>Job Command Center</small></div></div>
+        <div className="auth-brand"><BrandLogo priority /><div><strong>BRIAN</strong><small>Job Command Center</small></div></div>
         <div className="auth-lock">Private admin portal</div>
         <p className="eyebrow">Supabase protected</p>
         <h1 id="auth-title">Welcome back.</h1>
@@ -569,6 +588,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
   const [jobSort, setJobSort] = useState<"newest" | "oldest">("newest");
+  const [feedDate, setFeedDate] = useState("all");
   const [visibleJobCount, setVisibleJobCount] = useState(JOBS_PER_PAGE);
   const [dark, setDark] = useState(true);
   const [saved, setSaved] = useState<number[]>([]);
@@ -617,7 +637,7 @@ export default function Home() {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorMessage, setEditorMessage] = useState("");
-  const [currentDate] = useState(() => new Date());
+  const [currentDate, setCurrentDate] = useState(() => new Date());
   const searchRef = useRef<HTMLInputElement>(null);
 
   const loadDashboard = useCallback(async () => {
@@ -692,6 +712,11 @@ export default function Home() {
   }, [loadDashboard]);
 
   useEffect(() => {
+    const clock = window.setInterval(() => setCurrentDate(new Date()), 1_000);
+    return () => window.clearInterval(clock);
+  }, []);
+
+  useEffect(() => {
     if (authPhase !== "authorized") return;
 
     let timeoutId = 0;
@@ -750,26 +775,40 @@ export default function Home() {
     void loadDocuments();
   }, [selectedJob]);
 
+  const availableFeedDates = useMemo(() => [...new Set(jobs
+    .map((job) => job.dateFound)
+    .filter((date): date is string => Boolean(date)))]
+    .sort((first, second) => second.localeCompare(first)), [jobs]);
+
   const filteredJobs = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return jobs
       .filter((job) => {
         const matchesFilter = filter === "All" || job.match === filter;
+        const matchesDate = feedDate === "all" || job.dateFound === feedDate;
         const haystack = `${job.company} ${job.role} ${job.track} ${job.tags.join(" ")}`.toLowerCase();
-        return matchesFilter && (!normalized || haystack.includes(normalized));
+        return matchesFilter && matchesDate && (!normalized || haystack.includes(normalized));
       })
       .sort((first, second) => {
         const firstDate = first.dateFound ? new Date(`${first.dateFound}T00:00:00`).getTime() : null;
         const secondDate = second.dateFound ? new Date(`${second.dateFound}T00:00:00`).getTime() : null;
-        if (firstDate === null && secondDate === null) return second.id - first.id;
+        if (firstDate === null && secondDate === null) return second.score - first.score || second.id - first.id;
         if (firstDate === null) return 1;
         if (secondDate === null) return -1;
         const dateDifference = jobSort === "newest" ? secondDate - firstDate : firstDate - secondDate;
-        return dateDifference || second.id - first.id;
+        return dateDifference || second.score - first.score || second.id - first.id;
       });
-  }, [filter, query, jobs, jobSort]);
+  }, [feedDate, filter, query, jobs, jobSort]);
 
   const visibleJobs = filteredJobs.slice(0, visibleJobCount);
+  const groupedVisibleJobs = useMemo(() => {
+    const groups = new Map<string, Job[]>();
+    for (const job of visibleJobs) {
+      const key = job.dateFound || "undated";
+      groups.set(key, [...(groups.get(key) || []), job]);
+    }
+    return [...groups.entries()];
+  }, [visibleJobs]);
   const remainingJobCount = Math.max(0, filteredJobs.length - visibleJobs.length);
 
   const scrollTo = (label: string) => {
@@ -1334,7 +1373,7 @@ export default function Home() {
   };
 
   if (authPhase === "checking") {
-    return <main className="auth-shell"><div className="auth-loading"><span className="brand-mark">B</span><p>Opening your private command center...</p></div></main>;
+    return <main className="auth-shell"><div className="auth-loading"><BrandLogo priority /><p>Opening your private command center...</p></div></main>;
   }
   if (authPhase === "signed_out") return <AuthScreen onAuthenticated={loadDashboard} />;
   if (authPhase === "denied") {
@@ -1347,6 +1386,10 @@ export default function Home() {
   const reviewCount = jobs.filter((job) => job.match === "Review").length;
   const blockedCount = jobs.filter((job) => job.match === "Blocked").length;
   const todayLabel = new Intl.DateTimeFormat("en-SG", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(currentDate);
+  const greeting = currentDate.getHours() < 12 ? "Good morning" : currentDate.getHours() < 18 ? "Good afternoon" : "Good evening";
+  const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Local time";
+  const timeZoneShort = new Intl.DateTimeFormat("en-SG", { timeZoneName: "short" }).formatToParts(currentDate).find((part) => part.type === "timeZoneName")?.value || "";
+  const clockLabel = new Intl.DateTimeFormat("en-SG", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(currentDate);
   const daysToAvailability = profile?.available_from
     ? Math.max(0, Math.ceil((new Date(`${profile.available_from}T00:00:00+08:00`).getTime() - currentDate.getTime()) / 86_400_000))
     : 0;
@@ -1362,7 +1405,7 @@ export default function Home() {
 
       <aside className="sidebar">
         <button className="brand" onClick={() => scrollTo("Overview")}>
-          <span className="brand-mark">B</span>
+          <BrandLogo priority />
           <span><strong>BRIAN</strong><small>Job OS</small></span>
         </button>
         <nav aria-label="Main navigation">
@@ -1384,7 +1427,7 @@ export default function Home() {
 
       <section className="workspace">
         <header className="topbar">
-          <div className="mobile-brand"><span className="brand-mark">B</span><strong>Job OS</strong></div>
+          <div className="mobile-brand"><BrandLogo priority /><strong>Job OS</strong></div>
           <label className="search-box">
             <span aria-hidden="true">⌕</span>
             <input ref={searchRef} value={query} onChange={(event) => { setQuery(event.target.value); setVisibleJobCount(JOBS_PER_PAGE); }} placeholder="Search jobs, companies, skills" aria-label="Search jobs" />
@@ -1400,11 +1443,17 @@ export default function Home() {
           {dataError ? <div className="data-banner" role="alert"><span>!</span><p><strong>Live data needs attention</strong>{dataError}</p><button onClick={loadDashboard}>Retry</button></div> : null}
           <section id="overview" className="welcome-section">
             <div>
-              <p className="eyebrow">{todayLabel}</p>
-              <h1>Good morning, Brian.</h1>
+              <p className="eyebrow" suppressHydrationWarning>{todayLabel}</p>
+              <h1 suppressHydrationWarning>{greeting}, Brian.</h1>
               <p className="subcopy">{dataLoading ? "Refreshing your private workspace..." : `${jobs.length} opportunities tracked. ${strongCount} strong ${strongCount === 1 ? "match is" : "matches are"} ready for review.`}</p>
             </div>
-            <div className="secure-chip"><span aria-hidden="true">◉</span> Supabase admin session</div>
+            <div className="welcome-meta">
+              <div className="browser-clock" aria-label={`Browser time in ${browserTimeZone}`}>
+                <span aria-hidden="true">◷</span>
+                <div><time suppressHydrationWarning>{clockLabel}</time><small suppressHydrationWarning>{browserTimeZone}{timeZoneShort ? ` · ${timeZoneShort}` : ""}</small></div>
+              </div>
+              <div className="secure-chip"><span aria-hidden="true">◉</span> Supabase admin session</div>
+            </div>
           </section>
 
           <section className="stats-grid" aria-label="Application summary">
@@ -1457,15 +1506,19 @@ export default function Home() {
                 ))}
               </div>
               <div className="pipeline-tools">
+                <label className="date-sort feed-date-filter"><span>Feed date</span><select value={feedDate} onChange={(event) => { setFeedDate(event.target.value); setVisibleJobCount(JOBS_PER_PAGE); }}><option value="all">All feed dates</option>{availableFeedDates.map((date) => <option key={date} value={date}>{feedDateLabel(date)}</option>)}</select></label>
                 <label className="date-sort"><span>Sort by date</span><select value={jobSort} onChange={(event) => { setJobSort(event.target.value as "newest" | "oldest"); setVisibleJobCount(JOBS_PER_PAGE); }}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
                 <p>Showing {visibleJobs.length} of {filteredJobs.length}</p>
               </div>
             </div>
             <div className="job-list">
-              {filteredJobs.length ? visibleJobs.map((job) => (
-                <JobCard key={job.id} job={job} saved={saved.includes(job.id)} onSave={() => toggleSave(job.id)} onOpen={() => openJobDetails(job)} />
+              {filteredJobs.length ? groupedVisibleJobs.map(([date, dateJobs]) => (
+                <Fragment key={date}>
+                  <div className="feed-day-heading"><span>{feedDateLabel(date === "undated" ? null : date)}</span><small>{dateJobs.length} {dateJobs.length === 1 ? "job" : "jobs"} shown · highest match first</small></div>
+                  {dateJobs.map((job) => <JobCard key={job.id} job={job} saved={saved.includes(job.id)} onSave={() => toggleSave(job.id)} onOpen={() => openJobDetails(job)} />)}
+                </Fragment>
               )) : (
-                <div className="empty-state"><span>⌕</span><h3>No matching jobs</h3><p>Try a different search or pipeline filter.</p></div>
+                <div className="empty-state"><span>⌕</span><h3>No matching jobs</h3><p>Try a different search, match filter, or feed date.</p></div>
               )}
             </div>
             {remainingJobCount > 0 ? <div className="load-more-row"><button className="load-more-button" onClick={() => setVisibleJobCount((count) => Math.min(count + JOBS_PER_PAGE, filteredJobs.length))}><span>Load more jobs</span><small>{remainingJobCount} remaining</small></button></div> : null}
@@ -1564,7 +1617,7 @@ export default function Home() {
             </div>
           </section>
 
-          <footer><p>Supabase is the live source of truth. Notion is an optional backup you control.</p><span>Private • Admin-only access</span></footer>
+          <footer><p suppressHydrationWarning>© {currentDate.getFullYear()} Le Do Nguyen Tu. All rights reserved.</p><span>Proudly made by Le Do Nguyen Tu.</span></footer>
         </div>
       </section>
 

@@ -256,15 +256,19 @@ Deno.serve(async (request: Request) => {
   const parsedSources = settings.discovery_source_urls.map(parseSource).filter(Boolean) as NonNullable<ReturnType<typeof parseSource>>[];
   const failures: string[] = [];
   const allCandidates: Candidate[] = [];
-  for (const source of parsedSources) {
+  const sourceResults = await Promise.all(parsedSources.map(async (source) => {
     try {
       const rows = source.platform === "Greenhouse"
         ? await fetchGreenhouse(source.slug, source.sourceUrl)
         : await fetchLever(source.slug, source.sourceUrl);
-      allCandidates.push(...rows);
+      return { rows, error: null };
     } catch (error) {
-      failures.push(error instanceof Error ? error.message : `Could not read ${source.sourceUrl}`);
+      return { rows: [] as Candidate[], error: error instanceof Error ? error.message : `Could not read ${source.sourceUrl}` };
     }
+  }));
+  for (const result of sourceResults) {
+    allCandidates.push(...result.rows);
+    if (result.error) failures.push(result.error);
   }
 
   const uniqueCandidates = [...new Map(allCandidates.map((candidate) => [canonicalUrl(candidate.jobUrl), candidate])).values()];
