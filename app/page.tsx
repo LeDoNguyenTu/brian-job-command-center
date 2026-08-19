@@ -1134,7 +1134,7 @@ export default function Home() {
               <label className="file-field"><span>Resume document</span><input type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setResumeFile(event.target.files?.[0] || null)} /></label>
               <p className="editor-note">{resumeFile ? `${resumeFile.name} will replace the current file.` : resumeDraft.original_filename ? `Current private file: ${resumeDraft.original_filename}` : "Upload an editable DOCX or a PDF. Files stay private and require your administrator session."}</p>
               {editorMessage ? <p className="editor-message">{editorMessage}</p> : null}
-              <div className="editor-actions"><span />{resumeDraft.storage_path ? <button type="button" className="secondary-button" onClick={() => downloadResume(resumeDraft)}>Download current</button> : null}<button type="button" className="secondary-button" onClick={() => setResumeEditorOpen(false)}>Cancel</button><button className="primary-button" disabled={editorBusy}>{editorBusy ? "Saving..." : "Save resume"}</button></div>
+              <div className="editor-actions resume-editor-actions"><span />{resumeDraft.storage_path ? <button type="button" className="secondary-button" onClick={() => downloadResume(resumeDraft)}>Download current</button> : null}<button type="button" className="secondary-button" onClick={() => setResumeEditorOpen(false)}>Cancel</button><button className="primary-button" disabled={editorBusy}>{editorBusy ? "Saving..." : "Save resume"}</button></div>
             </form>
           </section>
         </div>
