@@ -49,4 +49,6 @@ test("keeps theme text and accent tokens at readable contrast", () => {
   assert.match(globalStyles, /--control-border:#626b82/);
   assert.match(globalStyles, /--control-border:#8e94a3/);
   assert.match(globalStyles, /--primary-start:#7353db;--primary-end:#5e3cc5/);
+  assert.match(globalStyles, /\.primary-button:disabled\{opacity:\.82/);
+  assert.match(globalStyles, /\.secondary-button:disabled,\.passkey-button:disabled\{opacity:\.72/);
 });
