@@ -4,7 +4,6 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "npm
 import { strFromU8, unzipSync } from "npm:fflate@0.8.2";
 
 const allowedOrigins = new Set([
-  "https://brian-job-command-center.meo-ah.chatgpt.site",
   "https://brian-job.vercel.app",
   "http://terminal.local:4173",
   "http://localhost:4173",
@@ -19,7 +18,7 @@ const jsonHeaders = (request: Request) => {
   return {
     "Access-Control-Allow-Origin": isAllowedOrigin(origin)
       ? origin
-      : "https://brian-job-command-center.meo-ah.chatgpt.site",
+      : "https://brian-job.vercel.app",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Content-Type": "application/json",
@@ -209,7 +208,7 @@ Return JSON only, using exactly this structure:
   "cover_letter": {
     "greeting": "Dear Hiring Team,",
     "paragraphs": ["Opening paragraph", "Evidence paragraph", "Fit and sponsorship paragraph"],
-    "closing": "Sincerely,\nLe Do Nguyen Tu"
+    "closing": "Sincerely, followed by the candidate full name from PROFILE"
   }
 }
 
@@ -306,7 +305,7 @@ function normalizeGenerated(value: unknown): GeneratedContent {
       paragraphs: Array.isArray(root.cover_letter.paragraphs)
         ? root.cover_letter.paragraphs.slice(0, 6).map((paragraph) => clean(paragraph, 1600)).filter(Boolean)
         : [],
-      closing: clean(root.cover_letter.closing, 160).replace(/\s*Le Do Nguyen Tu$/i, "\nLe Do Nguyen Tu"),
+      closing: clean(root.cover_letter.closing, 160) || "Sincerely,",
     },
   };
   if (!normalized.resume.headline || !normalized.resume.summary || !normalized.resume.sections.length || !normalized.cover_letter.paragraphs.length) {
@@ -422,8 +421,8 @@ function drawSectionHeading(ctx: DrawContext, heading: string) {
 
 function layoutResume(page: PDFPage, fonts: { regular: PDFFont; bold: PDFFont; italic: PDFFont }, content: GeneratedContent["resume"], header: string[], baseSize: number, leadingScale: number, draw: boolean) {
   const ctx: DrawContext = { page, ...fonts, baseSize, leadingScale, draw, y: 805 };
-  const name = clean(header[0] || "Le Do Nguyen Tu", 100).toUpperCase();
-  const contact = clean(header[2] || "Singapore | ledonguyentu@gmail.com | ldnt.me | github.com/LeDoNguyenTu", 250);
+  const name = clean(header[0] || "Candidate", 100).toUpperCase();
+  const contact = clean(header[2] || "Singapore", 250);
   if (draw) page.drawText(name, { x: 40, y: ctx.y, size: 20.5, font: fonts.bold, color: black });
   ctx.y -= 22.8;
   drawLines(ctx, content.headline, { font: fonts.bold, size: 10.7, color: navy });
@@ -498,8 +497,8 @@ async function renderCoverLetterPdf(content: GeneratedContent["cover_letter"], j
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const header = baseline.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 3);
-  const name = clean(header[0] || "Le Do Nguyen Tu", 100).toUpperCase();
-  const contact = clean(header[2] || "Singapore | ledonguyentu@gmail.com | ldnt.me | github.com/LeDoNguyenTu", 250);
+  const name = clean(header[0] || "Candidate", 100).toUpperCase();
+  const contact = clean(header[2] || "Singapore", 250);
   page.drawText(name, { x: 48, y: 790, size: 20.5, font: bold, color: black });
   page.drawText(contact, { x: 48, y: 773, size: 8.4, font: regular, color: gray });
   page.drawLine({ start: { x: 48, y: 762 }, end: { x: 547, y: 762 }, thickness: 1, color: navy });

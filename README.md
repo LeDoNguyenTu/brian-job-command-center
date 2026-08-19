@@ -1,6 +1,6 @@
 # Brian Job Command Center
 
-A private job search and application dashboard built with Next.js, Vinext, and Supabase.
+A private job search and application dashboard built with Next.js and Supabase, deployed independently on Vercel.
 
 ## Features
 
@@ -33,9 +33,19 @@ npm test
 npm run lint
 ```
 
+Vercel uses the standard Next.js build command. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in the Vercel project environment for Production, Preview, and Development.
+
 ## Database
 
 Apply the SQL files in `supabase/migrations/` in filename order. Deploy `supabase/functions/discover-jobs/index.ts` with custom request authentication for scheduled discovery. Deploy `supabase/functions/tailor-documents/index.ts` with JWT verification for private prompt preparation and on-demand PDF generation. Deploy `supabase/functions/sync-notion/index.ts` as an authenticated Edge Function if Notion backup is needed.
+
+The migrations intentionally contain no personal profile values or private workspace URLs. After applying them to a new project, replace the placeholder administrator before creating the account:
+
+```sql
+update public.app_admins
+set email = lower('YOUR_ADMIN_EMAIL')
+where email = 'admin@example.com';
+```
 
 For a new Supabase project, set the private scheduled function URL after applying the migrations:
 
@@ -46,4 +56,4 @@ set function_url = 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/discover-j
 where id = 1;
 ```
 
-The website uses Supabase as its primary data source. Notion is optional and is never required for normal dashboard editing.
+The website uses Supabase as its primary data source. Notion is optional and is never required for normal dashboard editing. The production site is `https://brian-job.vercel.app`.

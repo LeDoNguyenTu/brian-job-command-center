@@ -2,7 +2,6 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.112.3";
 
 const allowedOrigins = new Set([
-  "https://brian-job-command-center.meo-ah.chatgpt.site",
   "https://brian-job.vercel.app",
   "http://terminal.local:4173",
   "http://localhost:4173",
@@ -15,7 +14,7 @@ const isAllowedOrigin = (origin: string) =>
 const corsHeaders = (request: Request) => ({
   "Access-Control-Allow-Origin": isAllowedOrigin(request.headers.get("origin") || "")
     ? request.headers.get("origin")!
-    : "https://brian-job-command-center.meo-ah.chatgpt.site",
+    : "https://brian-job.vercel.app",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json",

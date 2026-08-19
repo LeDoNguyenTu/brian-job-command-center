@@ -1,9 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
-const PRODUCTION_ORIGIN = "https://brian-job-command-center.meo-ah.chatgpt.site";
+const PRODUCTION_ORIGIN = "https://brian-job.vercel.app";
 const ALLOWED_ORIGINS = new Set([
   PRODUCTION_ORIGIN,
-  "https://brian-job.vercel.app",
   "http://terminal.local:4173",
   "http://localhost:4173",
 ]);

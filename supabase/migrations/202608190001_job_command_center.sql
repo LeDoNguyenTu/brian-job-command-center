@@ -89,7 +89,7 @@ create table public.app_settings (
 );
 
 insert into public.app_admins (email)
-values ('ledonguyentu@gmail.com');
+values ('admin@example.com');
 
 insert into public.private_profile (
   full_name,
@@ -107,34 +107,34 @@ insert into public.private_profile (
   notion_url
 )
 values (
-  'Le Do Nguyen Tu',
-  'Brian',
-  '2005-04-21',
-  'Vietnamese',
-  'Student''s Pass',
-  '2026-09-30',
-  '2026-08-31',
-  array['Vietnamese', 'English'],
+  'Configure in dashboard',
+  'Admin',
+  '1970-01-01',
+  'Not configured',
+  'Not configured',
+  '1970-01-01',
+  '1970-01-01',
+  array[]::text[],
   false,
   false,
   true,
   'Singapore',
-  'https://app.notion.com/p/3c0bd4ad42a98152ab5ccc7721fe1c81'
+  null
 );
 
 insert into public.resumes (code, name, fit, recommendation, tone, notion_url, sort_order)
 values
-  ('DEV', 'Developer', 'Backend, full-stack, APIs, integrations', 'Recommended for software engineering roles', 'violet', 'https://app.notion.com/p/3c0bd4ad42a98188898bf1d821fe1425', 1),
-  ('S+D', 'Security + Development', 'Secure software, AppSec, cloud security', 'Best for hybrid engineering roles', 'cyan', 'https://app.notion.com/p/3c0bd4ad42a98168a2edfc5040d36adb', 2),
-  ('SEC', 'Security', 'SOC, vulnerabilities, forensics, governance', 'Best for dedicated security roles', 'green', 'https://app.notion.com/p/3c0bd4ad42a981648125d187a397a7da', 3);
+  ('DEV', 'Developer', 'Backend, full-stack, APIs, integrations', 'Recommended for software engineering roles', 'violet', null, 1),
+  ('S+D', 'Security + Development', 'Secure software, AppSec, cloud security', 'Best for hybrid engineering roles', 'cyan', null, 2),
+  ('SEC', 'Security', 'SOC, vulnerabilities, forensics, governance', 'Best for dedicated security roles', 'green', null, 3);
 
 insert into public.app_settings (
   notion_data_source_id,
   notion_hub_url
 )
 values (
-  'e1248229-3597-4222-b9a5-49991972013f',
-  'https://app.notion.com/p/cf3a242773ef4ce686fde98a41e8f63f'
+  '',
+  ''
 );
 
 create or replace function private.is_app_admin()

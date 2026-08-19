@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { supabase } from "@/lib/supabase";
 
 const FALLBACK_NOTION_HUB =
-  "https://app.notion.com/p/cf3a242773ef4ce686fde98a41e8f63f";
+  "https://www.notion.so/";
 const MOM_S_PASS =
   "https://www.mom.gov.sg/passes-and-permits/s-pass/eligibility";
 
