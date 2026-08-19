@@ -55,6 +55,11 @@ type AppSettings = {
   last_scheduled_discovery_date?: string | null;
   discovery_status?: string;
   discovery_message?: string | null;
+  document_provider?: "gemini" | "openai_compatible";
+  document_model?: string;
+  document_endpoint?: string | null;
+  document_provider_configured?: boolean;
+  document_provider_updated_at?: string | null;
 };
 
 type JobRow = {
@@ -84,6 +89,7 @@ type JobRow = {
   cv_status: string | null;
   cover_letter_status: string | null;
   salary: string | null;
+  job_description: string | null;
 };
 
 type Job = {
@@ -114,6 +120,7 @@ type Job = {
   cvStatus: string | null;
   coverLetterStatus: string | null;
   salary: string | null;
+  jobDescription: string | null;
 };
 
 type JobDraft = {
@@ -140,6 +147,28 @@ type JobDraft = {
   cv_status: string;
   cover_letter_status: string;
   salary: string;
+  job_description: string;
+};
+
+type GeneratedDocument = {
+  id: number;
+  job_id: number;
+  document_type: "resume" | "cover_letter";
+  storage_path: string;
+  filename: string;
+  source_resume_code: string;
+  provider: string;
+  model: string;
+  created_at: string;
+};
+
+type ResumeSuggestion = {
+  code: string;
+  name: string;
+  score: number;
+  color: "green" | "yellow" | "red";
+  label: string;
+  guidance: string;
 };
 
 const EMPTY_JOB: JobDraft = {
@@ -165,6 +194,7 @@ const EMPTY_JOB: JobDraft = {
   cv_status: "Not started",
   cover_letter_status: "Not started",
   salary: "",
+  job_description: "",
 };
 
 function initials(company: string) {
@@ -222,6 +252,37 @@ function mapJob(row: JobRow): Job {
     cvStatus: row.cv_status,
     coverLetterStatus: row.cover_letter_status,
     salary: row.salary,
+    jobDescription: row.job_description,
+  };
+}
+
+function suggestResume(job: Job, resumes: Resume[]): ResumeSuggestion {
+  const text = `${job.role} ${job.track} ${job.tags.join(" ")} ${job.jobDescription || ""}`.toLowerCase();
+  const keywordHits = (patterns: RegExp[]) => patterns.reduce((total, pattern) => total + (pattern.test(text) ? 1 : 0), 0);
+  const software = keywordHits([/software|developer|engineer|full.?stack|backend|frontend/, /typescript|javascript|react|next\.?js/, /python|fastapi|c\+\+|java/, /api|postgres|sql|database/]);
+  const security = keywordHits([/security|cyber|soc|vulnerab|penetration/, /incident|detection|forensic|mitre|splunk/, /appsec|devsecops|secure coding|authentication/, /governance|risk|compliance|pdpa/]);
+  const cloud = keywordHits([/cloud|devops|infrastructure/, /aws|azure|gcp|linux|network/]);
+
+  const candidates = [
+    { code: "DEV", score: 45 + software * 12 + Math.min(8, cloud * 3) },
+    { code: "S+D", score: 44 + software * 8 + security * 8 + cloud * 4 },
+    { code: "SEC", score: 44 + security * 12 + Math.min(8, cloud * 3) },
+  ].map((candidate) => ({ ...candidate, score: Math.min(96, candidate.score) }));
+  if (job.match === "Blocked") candidates.forEach((candidate) => { candidate.score = Math.min(candidate.score, 48); });
+  const best = candidates.sort((left, right) => right.score - left.score)[0];
+  const resume = resumes.find((item) => item.code === best.code);
+  const color = best.score >= 80 ? "green" : best.score >= 60 ? "yellow" : "red";
+  return {
+    code: best.code,
+    name: resume?.name || best.code,
+    score: best.score,
+    color,
+    label: color === "green" ? "Ready to submit" : color === "yellow" ? "Usable with small edits" : "Generate a new version",
+    guidance: color === "green"
+      ? "This baseline already aligns well. Tailoring is optional."
+      : color === "yellow"
+        ? "You can submit this baseline, but a few targeted edits should improve relevance."
+        : "Do not use the baseline unchanged. Generate a tailored version first.",
   };
 }
 
@@ -408,6 +469,18 @@ export default function Home() {
   const [discoverySources, setDiscoverySources] = useState("");
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [discoveryMessage, setDiscoveryMessage] = useState("");
+  const [documentProvider, setDocumentProvider] = useState<"gemini" | "openai_compatible">("gemini");
+  const [documentModel, setDocumentModel] = useState("gemini-3.6-flash");
+  const [documentEndpoint, setDocumentEndpoint] = useState("");
+  const [documentKey, setDocumentKey] = useState("");
+  const [documentProviderBusy, setDocumentProviderBusy] = useState(false);
+  const [documentProviderMessage, setDocumentProviderMessage] = useState("");
+  const [generatedDocuments, setGeneratedDocuments] = useState<GeneratedDocument[]>([]);
+  const [documentResumeCode, setDocumentResumeCode] = useState("DEV");
+  const [documentConsent, setDocumentConsent] = useState(false);
+  const [documentBusy, setDocumentBusy] = useState(false);
+  const [documentMessage, setDocumentMessage] = useState("");
+  const [promptCopied, setPromptCopied] = useState(false);
   const [passkeys, setPasskeys] = useState<Array<{ id: string; friendly_name?: string; created_at: string }>>([]);
   const [jobEditorOpen, setJobEditorOpen] = useState(false);
   const [jobDraft, setJobDraft] = useState<JobDraft>(EMPTY_JOB);
@@ -462,6 +535,9 @@ export default function Home() {
       setDiscoveryTime((nextSettings.discovery_time || "08:00").slice(0, 5));
       setDiscoveryTimezone(nextSettings.discovery_timezone || "Asia/Singapore");
       setDiscoverySources((nextSettings.discovery_source_urls ?? []).join("\n"));
+      setDocumentProvider(nextSettings.document_provider || "gemini");
+      setDocumentModel(nextSettings.document_model || "gemini-3.6-flash");
+      setDocumentEndpoint(nextSettings.document_endpoint || "");
     }
     setAuthPhase("authorized");
     setDataLoading(false);
@@ -487,6 +563,19 @@ export default function Home() {
     };
   }, [loadDashboard]);
 
+  useEffect(() => {
+    if (!selectedJob) return;
+    const loadDocuments = async () => {
+      const { data, error } = await supabase.from("generated_documents")
+        .select("*")
+        .eq("job_id", selectedJob.id)
+        .order("created_at", { ascending: false });
+      if (error) setDocumentMessage(error.message);
+      else setGeneratedDocuments((data ?? []) as GeneratedDocument[]);
+    };
+    void loadDocuments();
+  }, [selectedJob]);
+
   const filteredJobs = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return jobs.filter((job) => {
@@ -498,6 +587,16 @@ export default function Home() {
 
   const scrollTo = (label: string) => {
     document.getElementById(label.toLowerCase())?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const openJobDetails = (job: Job) => {
+    const suggestion = suggestResume(job, resumes);
+    setDocumentResumeCode(suggestion.code);
+    setGeneratedDocuments([]);
+    setDocumentConsent(false);
+    setDocumentMessage("");
+    setPromptCopied(false);
+    setSelectedJob(job);
   };
 
   const toggleSave = async (id: number) => {
@@ -704,6 +803,101 @@ export default function Home() {
     setDiscoveryBusy(false);
   };
 
+  const saveDocumentProvider = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (documentKey.trim().length < 16) {
+      setDocumentProviderMessage("Enter a valid provider key. It is sent directly to Supabase Vault after you confirm.");
+      return;
+    }
+    if (!documentModel.trim()) {
+      setDocumentProviderMessage("Enter the model name supplied by your provider.");
+      return;
+    }
+    if (documentProvider === "openai_compatible" && !documentEndpoint.trim().startsWith("https://")) {
+      setDocumentProviderMessage("Enter the provider's full HTTPS chat-completions endpoint.");
+      return;
+    }
+    if (!window.confirm(`Save this ${documentProvider === "gemini" ? "Gemini" : "custom provider"} key in your encrypted Supabase Vault?`)) return;
+    setDocumentProviderBusy(true);
+    setDocumentProviderMessage("");
+    const { error } = await supabase.rpc("store_document_provider_config", {
+      provider_value: documentProvider,
+      key_value: documentKey.trim(),
+      model_value: documentModel.trim(),
+      endpoint_value: documentProvider === "openai_compatible" ? documentEndpoint.trim() : null,
+    });
+    if (error) setDocumentProviderMessage(error.message);
+    else {
+      setDocumentKey("");
+      setDocumentProviderMessage("Provider saved. The key is encrypted in Supabase Vault and is never shown again.");
+      await loadDashboard();
+    }
+    setDocumentProviderBusy(false);
+  };
+
+  const clearDocumentProvider = async () => {
+    if (!window.confirm("Remove the saved document provider key from Supabase Vault?")) return;
+    setDocumentProviderBusy(true);
+    const { error } = await supabase.rpc("clear_document_provider_config");
+    setDocumentProviderMessage(error ? error.message : "Provider key removed. External prompt copy still works.");
+    if (!error) await loadDashboard();
+    setDocumentProviderBusy(false);
+  };
+
+  const edgeErrorMessage = async (error: unknown, fallback: string) => {
+    if (error && typeof error === "object" && "context" in error) {
+      const context = (error as { context?: Response }).context;
+      if (context) {
+        const body = await context.clone().json().catch(() => null);
+        if (body?.error) return String(body.error);
+      }
+    }
+    return error instanceof Error ? error.message : fallback;
+  };
+
+  const copyExternalPrompt = async () => {
+    if (!selectedJob) return;
+    setDocumentBusy(true);
+    setDocumentMessage("Preparing the job-specific prompt from your private baseline...");
+    const { data, error } = await supabase.functions.invoke("tailor-documents", {
+      body: { action: "prepare_prompt", job_id: selectedJob.id, resume_code: documentResumeCode },
+    });
+    if (error || !data?.prompt) setDocumentMessage(await edgeErrorMessage(error, "The prompt could not be prepared."));
+    else {
+      await navigator.clipboard.writeText(data.prompt);
+      setPromptCopied(true);
+      setDocumentMessage("Prompt copied. Paste it into any document service when your saved provider is unavailable or at its limit.");
+      window.setTimeout(() => setPromptCopied(false), 1800);
+    }
+    setDocumentBusy(false);
+  };
+
+  const generateDocuments = async () => {
+    if (!selectedJob || !documentConsent) return;
+    setDocumentBusy(true);
+    setDocumentMessage("Generating one-page ATS documents on request. No application will be submitted.");
+    const { data, error } = await supabase.functions.invoke("tailor-documents", {
+      body: { action: "generate", job_id: selectedJob.id, resume_code: documentResumeCode },
+    });
+    if (error || !data?.documents) {
+      setDocumentMessage(await edgeErrorMessage(error, "Document generation failed. No files were saved."));
+    } else {
+      setGeneratedDocuments((data.documents ?? []) as GeneratedDocument[]);
+      setDocumentMessage(`Resume and cover letter created from ${data.resume_name || documentResumeCode}. Review both PDFs before applying.`);
+      await loadDashboard();
+    }
+    setDocumentBusy(false);
+  };
+
+  const downloadGeneratedDocument = async (document: GeneratedDocument) => {
+    const { data, error } = await supabase.storage.from("generated-documents").createSignedUrl(document.storage_path, 60);
+    if (error || !data?.signedUrl) {
+      setDocumentMessage(error?.message || "The generated document could not be opened.");
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
+
   const openNewJob = () => {
     setJobDraft({ ...EMPTY_JOB, date_found: new Date().toISOString().slice(0, 10) });
     setEditorMessage("");
@@ -736,6 +930,7 @@ export default function Home() {
       cv_status: job.cvStatus || "Not started",
       cover_letter_status: job.coverLetterStatus || "Not started",
       salary: job.salary || "",
+      job_description: job.jobDescription || "",
     });
     setEditorMessage("");
     setJobEditorOpen(true);
@@ -772,6 +967,7 @@ export default function Home() {
       cv_status: jobDraft.cv_status.trim() || null,
       cover_letter_status: jobDraft.cover_letter_status.trim() || null,
       salary: jobDraft.salary.trim() || null,
+      job_description: jobDraft.job_description.trim() || null,
       updated_at: new Date().toISOString(),
     };
     const result = jobDraft.id
@@ -912,6 +1108,8 @@ export default function Home() {
   const sourceCount = settings?.discovery_source_urls?.length ?? 0;
   const discoveryReady = discoveryEnabled && sourceCount > 0;
   const scheduleZone = (settings?.discovery_timezone || discoveryTimezone) === "Asia/Singapore" ? "SGT" : (settings?.discovery_timezone || discoveryTimezone);
+  const selectedSuggestion = selectedJob ? suggestResume(selectedJob, resumes) : null;
+  const selectedResume = resumes.find((resume) => resume.code === documentResumeCode);
 
   return (
     <main className={dark ? "app-shell dark" : "app-shell light"}>
@@ -980,7 +1178,7 @@ export default function Home() {
                 <p className="focus-description">{topJob?.note || "Your private Supabase database is ready for live job records."}</p>
                 <div className="focus-tags">{topJob?.tags.length ? topJob.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>No skills loaded yet</span>}</div>
                 <div className="focus-actions">
-                  <button className="primary-button" disabled={!topJob} onClick={() => topJob && setSelectedJob(topJob)}>Review match</button>
+                  <button className="primary-button" disabled={!topJob} onClick={() => topJob && openJobDetails(topJob)}>Review match</button>
                   <button className="secondary-button" disabled={!topJob} onClick={() => topJob && toggleSave(topJob.id)}>{topJob && saved.includes(topJob.id) ? "Saved" : "Save role"}</button>
                 </div>
               </div>
@@ -1017,7 +1215,7 @@ export default function Home() {
             </div>
             <div className="job-list">
               {filteredJobs.length ? filteredJobs.map((job) => (
-                <JobCard key={job.id} job={job} saved={saved.includes(job.id)} onSave={() => toggleSave(job.id)} onOpen={() => setSelectedJob(job)} />
+                <JobCard key={job.id} job={job} saved={saved.includes(job.id)} onSave={() => toggleSave(job.id)} onOpen={() => openJobDetails(job)} />
               )) : (
                 <div className="empty-state"><span>⌕</span><h3>No matching jobs</h3><p>Try a different search or pipeline filter.</p></div>
               )}
@@ -1134,6 +1332,29 @@ export default function Home() {
               <div><span>✓</span><p><strong>Location</strong>Singapore</p></div>
               <div className={selectedJob.match === "Blocked" ? "warning" : ""}><span>{selectedJob.match === "Blocked" ? "!" : "?"}</span><p><strong>Next check</strong>{selectedJob.match === "Blocked" ? "Language requirement blocks this role" : "Confirm employer sponsorship"}</p></div>
             </div>
+            <section className="document-studio">
+              <div className="document-studio-heading">
+                <div><p>DOCUMENT FIT</p><h3>Resume and cover letter</h3></div>
+                {selectedSuggestion ? <span className={`baseline-score ${selectedSuggestion.color}`}><strong>{selectedSuggestion.score}%</strong>{selectedSuggestion.label}</span> : null}
+              </div>
+              {selectedSuggestion ? <p className="document-guidance"><strong>Suggested baseline: {selectedSuggestion.name} ({selectedSuggestion.code})</strong>{selectedSuggestion.guidance}</p> : null}
+              <label className="document-select"><span>Baseline for this job</span><select value={documentResumeCode} onChange={(event) => setDocumentResumeCode(event.target.value)}>{resumes.map((resume) => <option value={resume.code} key={resume.code}>{resume.name} - {resume.code}</option>)}</select></label>
+              <div className="jd-preview">
+                <span>Job description used</span>
+                <p>{selectedJob.jobDescription || "No full job description is stored yet. Add it in Edit in dashboard for stronger matching and tailoring."}</p>
+              </div>
+              <div className="document-actions">
+                <button className="secondary-button" onClick={copyExternalPrompt} disabled={documentBusy || !selectedResume?.storage_path}>{promptCopied ? "Prompt copied" : "Copy external prompt"}</button>
+                <button className="primary-button" onClick={generateDocuments} disabled={documentBusy || !documentConsent || !settings?.document_provider_configured || !selectedResume?.storage_path}>{documentBusy ? "Working..." : "Generate tailored PDFs"}</button>
+              </div>
+              <label className="provider-consent"><input type="checkbox" checked={documentConsent} onChange={(event) => setDocumentConsent(event.target.checked)} /><span>Send this job description, verified applicant facts, and selected resume to my configured provider only for this request.</span></label>
+              {!settings?.document_provider_configured ? <p className="document-notice">No provider key is saved. The external prompt button still works. Add a key in Security and connections when you want in-site PDF generation.</p> : null}
+              {documentMessage ? <p className="document-message" role="status">{documentMessage}</p> : null}
+              {generatedDocuments.length ? <div className="generated-list">
+                <p>PRIVATE PDF EXPORTS</p>
+                {generatedDocuments.map((document) => <button key={document.id} onClick={() => downloadGeneratedDocument(document)}><span>{document.document_type === "resume" ? "Resume" : "Cover letter"}</span><small>{document.source_resume_code} - {new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short" }).format(new Date(document.created_at))}</small><strong>Download ↓</strong></button>)}
+              </div> : null}
+            </section>
             <div className="modal-actions">
               <button className="primary-button" onClick={() => openJobEditor(selectedJob)}>Edit in dashboard</button>
               {selectedJob.jobUrl ? <a className="secondary-button" href={selectedJob.jobUrl} target="_blank" rel="noreferrer">Open job listing ↗</a> : null}
@@ -1174,6 +1395,7 @@ export default function Home() {
                 <label className="checkbox-field"><input type="checkbox" checked={jobDraft.approved_to_apply} onChange={(event) => setJobDraft({ ...jobDraft, approved_to_apply: event.target.checked })} /><span>Approved to apply</span></label>
               </div>
               <label><span>Matched skills, separated by commas</span><input value={jobDraft.matched_skills} onChange={(event) => setJobDraft({ ...jobDraft, matched_skills: event.target.value })} /></label>
+              <label><span>Full job description</span><textarea className="job-description-field" value={jobDraft.job_description} onChange={(event) => setJobDraft({ ...jobDraft, job_description: event.target.value })} rows={10} placeholder="Paste the complete job description here. Discovered Greenhouse and Lever roles are filled automatically." /></label>
               <label><span>Notes and risks</span><textarea value={jobDraft.gaps_risks} onChange={(event) => setJobDraft({ ...jobDraft, gaps_risks: event.target.value })} rows={4} /></label>
               {editorMessage ? <p className="editor-message">{editorMessage}</p> : null}
               <div className="editor-actions">
@@ -1263,6 +1485,26 @@ export default function Home() {
               </form>
               <p className="connection-detail">{settings?.last_discovery_at ? `Last run: ${new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short", timeZone: settings.discovery_timezone || "Asia/Singapore" }).format(new Date(settings.last_discovery_at))}. ${settings.discovery_message || ""}` : settings?.discovery_message || "No live discovery run yet. Existing prepared records will remain until you delete them."}</p>
               {discoveryMessage ? <p className="discovery-message" role="status">{discoveryMessage}</p> : null}
+            </section>
+
+            <section className="security-panel document-provider-panel">
+              <div className="security-heading"><div><p>Document provider</p><h3>On-demand resume tailoring</h3></div><span className={settings?.document_provider_configured ? "connection-status connected" : "connection-status"}>{settings?.document_provider_configured ? "Vault secured" : "Not configured"}</span></div>
+              <p className="security-copy">Your key is sent directly to encrypted Supabase Vault only after you confirm. It is never displayed again or stored in the browser. Generation runs only when you press Generate for a job.</p>
+              <form className="provider-form" onSubmit={saveDocumentProvider}>
+                <div className="provider-grid">
+                  <label><span>Provider</span><select value={documentProvider} onChange={(event) => {
+                    const provider = event.target.value as "gemini" | "openai_compatible";
+                    setDocumentProvider(provider);
+                    if (provider === "gemini" && !documentModel.trim()) setDocumentModel("gemini-3.6-flash");
+                  }}><option value="gemini">Google Gemini</option><option value="openai_compatible">OpenAI-compatible endpoint</option></select></label>
+                  <label><span>Model</span><input value={documentModel} onChange={(event) => setDocumentModel(event.target.value)} placeholder={documentProvider === "gemini" ? "gemini-3.6-flash" : "Provider model name"} required /></label>
+                </div>
+                {documentProvider === "openai_compatible" ? <label><span>Chat-completions endpoint</span><input type="url" value={documentEndpoint} onChange={(event) => setDocumentEndpoint(event.target.value)} placeholder="https://provider.example/v1/chat/completions" required /></label> : null}
+                <label><span>{settings?.document_provider_configured ? "Replacement API key" : "API key"}</span><input type="password" value={documentKey} onChange={(event) => setDocumentKey(event.target.value)} autoComplete="off" placeholder="Paste the key, then confirm" required /></label>
+                <div className="provider-actions"><button className="primary-button compact" disabled={documentProviderBusy}>{documentProviderBusy ? "Saving..." : settings?.document_provider_configured ? "Replace provider key" : "Confirm and save key"}</button>{settings?.document_provider_configured ? <button type="button" className="secondary-button" onClick={clearDocumentProvider} disabled={documentProviderBusy}>Remove key</button> : null}</div>
+              </form>
+              <p className="connection-detail">Gemini works with its API key and model. To change to another service, choose the custom option and provide that service&apos;s HTTPS endpoint, model, and key. Provider keys are not interchangeable.</p>
+              {documentProviderMessage ? <p className="discovery-message" role="status">{documentProviderMessage}</p> : null}
             </section>
 
             <section className="security-panel">

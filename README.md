@@ -10,6 +10,10 @@ A private job search and application dashboard built with Next.js, Vinext, and S
 - Scheduled and on-demand discovery from public Greenhouse and Lever company boards
 - URL-based duplicate protection enforced in PostgreSQL
 - Private DOCX and PDF resume storage
+- Deterministic baseline resume fit scores with green, yellow, and red guidance
+- Job-specific external prompt copy for use with any document service
+- On-demand one-page ATS resume and cover letter PDF generation
+- Gemini or custom OpenAI-compatible provider settings secured in Supabase Vault
 - S Pass salary planning
 - Optional one-way Notion backup
 
@@ -31,7 +35,7 @@ npm run lint
 
 ## Database
 
-Apply the SQL files in `supabase/migrations/` in filename order. Deploy `supabase/functions/discover-jobs/index.ts` with custom request authentication for scheduled discovery. Deploy `supabase/functions/sync-notion/index.ts` as an authenticated Edge Function if Notion backup is needed.
+Apply the SQL files in `supabase/migrations/` in filename order. Deploy `supabase/functions/discover-jobs/index.ts` with custom request authentication for scheduled discovery. Deploy `supabase/functions/tailor-documents/index.ts` with JWT verification for private prompt preparation and on-demand PDF generation. Deploy `supabase/functions/sync-notion/index.ts` as an authenticated Edge Function if Notion backup is needed.
 
 For a new Supabase project, set the private scheduled function URL after applying the migrations:
 

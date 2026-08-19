@@ -1,12 +1,21 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+const allowedOrigins = new Set([
+  "https://brian-job-command-center.meo-ah.chatgpt.site",
+  "http://terminal.local:4173",
+  "http://localhost:4173",
+]);
+
+const corsHeaders = (request: Request) => ({
+  "Access-Control-Allow-Origin": allowedOrigins.has(request.headers.get("origin") || "")
+    ? request.headers.get("origin")!
+    : "https://brian-job-command-center.meo-ah.chatgpt.site",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json",
-};
+  "Vary": "Origin",
+});
 
 type DiscoverySettings = {
   discovery_enabled: boolean;
@@ -47,8 +56,8 @@ type LeverJob = {
   categories?: { location?: string; commitment?: string };
 };
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: corsHeaders });
+const json = (request: Request, body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: corsHeaders(request) });
 
 const stripHtml = (value = "") => value
   .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -177,26 +186,26 @@ function classify(candidate: Candidate) {
 }
 
 Deno.serve(async (request: Request) => {
-  if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(request) });
+  if (request.method !== "POST") return json(request, { error: "Method not allowed" }, 405);
 
   const url = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  if (!url || !serviceKey || !anonKey) return json({ error: "Service configuration is incomplete" }, 500);
+  if (!url || !serviceKey || !anonKey) return json(request, { error: "Service configuration is incomplete" }, 500);
 
   const service = createClient(url, serviceKey, { auth: { persistSession: false } });
   let body: { action?: string } = {};
-  try { body = await request.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
-  const action = body.action === "scheduled" ? "scheduled" : "manual";
+  try { body = await request.json(); } catch { return json(request, { error: "Invalid JSON body" }, 400); }
+  const action = body.action === "scheduled" ? "scheduled" : body.action === "maintenance" ? "maintenance" : "manual";
 
-  if (action === "scheduled") {
+  if (action === "scheduled" || action === "maintenance") {
     const { data: expected, error } = await service.rpc("read_job_discovery_cron_secret_for_service");
-    if (error || !expected || request.headers.get("x-cron-secret") !== expected) return json({ error: "Unauthorized" }, 401);
+    if (error || !expected || request.headers.get("x-cron-secret") !== expected) return json(request, { error: "Unauthorized" }, 401);
   } else {
     const authorization = request.headers.get("Authorization") ?? "";
     const token = authorization.replace(/^Bearer\s+/i, "");
-    if (!token) return json({ error: "Unauthorized" }, 401);
+    if (!token) return json(request, { error: "Unauthorized" }, 401);
     const userClient = createClient(url, anonKey, {
       global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { persistSession: false },
@@ -205,7 +214,7 @@ Deno.serve(async (request: Request) => {
       userClient.auth.getUser(token),
       userClient.rpc("is_current_admin"),
     ]);
-    if (!userData.user || adminError || isAdmin !== true) return json({ error: "Unauthorized" }, 401);
+    if (!userData.user || adminError || isAdmin !== true) return json(request, { error: "Unauthorized" }, 401);
   }
 
   const { data: settingsData, error: settingsError } = await service
@@ -213,30 +222,30 @@ Deno.serve(async (request: Request) => {
     .select("discovery_enabled, discovery_time, discovery_timezone, discovery_source_urls, last_scheduled_discovery_date")
     .eq("id", 1)
     .single();
-  if (settingsError) return json({ error: settingsError.message }, 500);
+  if (settingsError) return json(request, { error: settingsError.message }, 500);
   const settings = settingsData as DiscoverySettings;
 
-  if (!settings.discovery_enabled && action === "scheduled") return json({ skipped: true, reason: "Discovery is paused" });
+  if (!settings.discovery_enabled && action === "scheduled") return json(request, { skipped: true, reason: "Discovery is paused" });
   if (!settings.discovery_source_urls?.length) {
     await service.from("app_settings").update({
       discovery_status: "Waiting for sources",
       discovery_message: "Add at least one Greenhouse or Lever company career page.",
       updated_at: new Date().toISOString(),
     }).eq("id", 1);
-    return json({ skipped: true, reason: "No supported career pages configured" });
+    return json(request, { skipped: true, reason: "No supported career pages configured" });
   }
 
   let localDate = "";
   if (action === "scheduled") {
     let clock;
     try { clock = localClock(settings.discovery_timezone || "Asia/Singapore"); }
-    catch { return json({ error: "Invalid discovery timezone" }, 400); }
+    catch { return json(request, { error: "Invalid discovery timezone" }, 400); }
     localDate = clock.date;
     const [hour, minute] = (settings.discovery_time || "08:00").split(":").map(Number);
     const target = hour * 60 + minute;
     const isDue = clock.minutes >= target && clock.minutes < target + 5;
     if (!isDue || settings.last_scheduled_discovery_date === localDate) {
-      return json({ skipped: true, reason: settings.last_scheduled_discovery_date === localDate ? "Already completed today" : "Not due" });
+      return json(request, { skipped: true, reason: settings.last_scheduled_discovery_date === localDate ? "Already completed today" : "Not due" });
     }
   }
 
@@ -287,6 +296,7 @@ Deno.serve(async (request: Request) => {
       ats_platform: candidate.atsPlatform,
       source_external_id: candidate.externalId,
       dedupe_key: canonicalUrl(candidate.jobUrl),
+      job_description: candidate.description || null,
       last_seen_at: new Date().toISOString(),
     };
   });
@@ -294,9 +304,24 @@ Deno.serve(async (request: Request) => {
   let inserted = 0;
   if (rows.length) {
     const { data, error } = await service.from("jobs").upsert(rows, { onConflict: "dedupe_key", ignoreDuplicates: true }).select("id");
-    if (error) return json({ error: error.message }, 500);
+    if (error) return json(request, { error: error.message }, 500);
     inserted = data?.length ?? 0;
   }
+
+  const repeated = eligible.filter((candidate) => existingKeys.has(canonicalUrl(candidate.jobUrl)));
+  const refreshResults = await Promise.all(repeated.map((candidate) => service.from("jobs").update({
+      company: candidate.company,
+      position: candidate.position,
+      location: candidate.location,
+      employment_type: candidate.employmentType,
+      source: candidate.source,
+      career_page: candidate.careerPage,
+      ats_platform: candidate.atsPlatform,
+      source_external_id: candidate.externalId,
+      job_description: candidate.description || null,
+      last_seen_at: new Date().toISOString(),
+    }).eq("dedupe_key", canonicalUrl(candidate.jobUrl))));
+  const refreshed = refreshResults.filter((result) => !result.error).length;
 
   const now = new Date().toISOString();
   const status = failures.length === parsedSources.length ? "Source error" : "Completed";
@@ -310,11 +335,12 @@ Deno.serve(async (request: Request) => {
     updated_at: now,
   }).eq("id", 1);
 
-  return json({
+  return json(request, {
     scanned: uniqueCandidates.length,
     eligible: eligible.length,
     inserted,
     duplicates: eligible.length - inserted,
+    refreshed,
     sources: parsedSources.length,
     sourceErrors: failures,
   });
