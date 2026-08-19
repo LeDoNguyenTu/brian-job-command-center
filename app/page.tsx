@@ -7,6 +7,7 @@ const FALLBACK_NOTION_HUB =
   "https://www.notion.so/";
 const MOM_S_PASS =
   "https://www.mom.gov.sg/passes-and-permits/s-pass/eligibility";
+const JOBS_PER_PAGE = 10;
 
 type Resume = {
   code: string;
@@ -567,6 +568,8 @@ export default function Home() {
   const [dataLoading, setDataLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
+  const [jobSort, setJobSort] = useState<"newest" | "oldest">("newest");
+  const [visibleJobCount, setVisibleJobCount] = useState(JOBS_PER_PAGE);
   const [dark, setDark] = useState(true);
   const [saved, setSaved] = useState<number[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
@@ -648,6 +651,7 @@ export default function Home() {
     } else {
       const rows = (jobsResult.data ?? []) as JobRow[];
       setJobs(rows.map(mapJob));
+      setVisibleJobCount(JOBS_PER_PAGE);
       setSaved(rows.filter((job) => job.saved).map((job) => Number(job.id)));
       setResumes((resumesResult.data ?? []) as Resume[]);
       setProfile(profileResult.data as PrivateProfile);
@@ -747,12 +751,25 @@ export default function Home() {
 
   const filteredJobs = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return jobs.filter((job) => {
-      const matchesFilter = filter === "All" || job.match === filter;
-      const haystack = `${job.company} ${job.role} ${job.track} ${job.tags.join(" ")}`.toLowerCase();
-      return matchesFilter && (!normalized || haystack.includes(normalized));
-    });
-  }, [filter, query, jobs]);
+    return jobs
+      .filter((job) => {
+        const matchesFilter = filter === "All" || job.match === filter;
+        const haystack = `${job.company} ${job.role} ${job.track} ${job.tags.join(" ")}`.toLowerCase();
+        return matchesFilter && (!normalized || haystack.includes(normalized));
+      })
+      .sort((first, second) => {
+        const firstDate = first.dateFound ? new Date(`${first.dateFound}T00:00:00`).getTime() : null;
+        const secondDate = second.dateFound ? new Date(`${second.dateFound}T00:00:00`).getTime() : null;
+        if (firstDate === null && secondDate === null) return second.id - first.id;
+        if (firstDate === null) return 1;
+        if (secondDate === null) return -1;
+        const dateDifference = jobSort === "newest" ? secondDate - firstDate : firstDate - secondDate;
+        return dateDifference || second.id - first.id;
+      });
+  }, [filter, query, jobs, jobSort]);
+
+  const visibleJobs = filteredJobs.slice(0, visibleJobCount);
+  const remainingJobCount = Math.max(0, filteredJobs.length - visibleJobs.length);
 
   const scrollTo = (label: string) => {
     document.getElementById(label.toLowerCase())?.scrollIntoView({ behavior: "smooth" });
@@ -1329,7 +1346,7 @@ export default function Home() {
           <div className="mobile-brand"><span className="brand-mark">B</span><strong>Job OS</strong></div>
           <label className="search-box">
             <span aria-hidden="true">⌕</span>
-            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search jobs, companies, skills" aria-label="Search jobs" />
+            <input ref={searchRef} value={query} onChange={(event) => { setQuery(event.target.value); setVisibleJobCount(JOBS_PER_PAGE); }} placeholder="Search jobs, companies, skills" aria-label="Search jobs" />
             <kbd>/</kbd>
           </label>
           <div className="top-actions">
@@ -1393,20 +1410,24 @@ export default function Home() {
             <div className="filter-row">
               <div className="filter-tabs" role="tablist" aria-label="Filter jobs">
                 {["All", "Strong", "Review", "Blocked"].map((item) => (
-                  <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)} role="tab" aria-selected={filter === item}>
+                  <button key={item} className={filter === item ? "active" : ""} onClick={() => { setFilter(item); setVisibleJobCount(JOBS_PER_PAGE); }} role="tab" aria-selected={filter === item}>
                     {item}<span>{item === "All" ? jobs.length : jobs.filter((job) => job.match === item).length}</span>
                   </button>
                 ))}
               </div>
-              <p>{filteredJobs.length} visible</p>
+              <div className="pipeline-tools">
+                <label className="date-sort"><span>Sort by date</span><select value={jobSort} onChange={(event) => { setJobSort(event.target.value as "newest" | "oldest"); setVisibleJobCount(JOBS_PER_PAGE); }}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+                <p>Showing {visibleJobs.length} of {filteredJobs.length}</p>
+              </div>
             </div>
             <div className="job-list">
-              {filteredJobs.length ? filteredJobs.map((job) => (
+              {filteredJobs.length ? visibleJobs.map((job) => (
                 <JobCard key={job.id} job={job} saved={saved.includes(job.id)} onSave={() => toggleSave(job.id)} onOpen={() => openJobDetails(job)} />
               )) : (
                 <div className="empty-state"><span>⌕</span><h3>No matching jobs</h3><p>Try a different search or pipeline filter.</p></div>
               )}
             </div>
+            {remainingJobCount > 0 ? <div className="load-more-row"><button className="load-more-button" onClick={() => setVisibleJobCount((count) => Math.min(count + JOBS_PER_PAGE, filteredJobs.length))}><span>Load more jobs</span><small>{remainingJobCount} remaining</small></button></div> : null}
           </section>
 
           <section id="resumes" className="resumes-section">

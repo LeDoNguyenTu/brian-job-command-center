@@ -33,7 +33,7 @@ npm test
 npm run lint
 ```
 
-Vercel uses the standard Next.js build command. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in the Vercel project environment for Production, Preview, and Development.
+Vercel uses the standard Next.js build command. The current Supabase URL and publishable key are safe public defaults in `lib/supabase.ts`, so production builds do not depend on environment setup. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in Vercel only when overriding the project for another environment.
 
 ## Database
 

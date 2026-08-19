@@ -1,11 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
-if (!supabaseUrl || !supabasePublishableKey) {
-  throw new Error("Supabase environment variables are not configured.");
-}
+const defaultSupabaseUrl = "https://xwsergbpvkcsugexssmc.supabase.co";
+const defaultSupabasePublishableKey = "sb_publishable_ZyCh_dhmxHpZ-OX5tLP2aQ_nFNno42X";
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || defaultSupabaseUrl;
+const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || defaultSupabasePublishableKey;
 
 export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
   auth: {
@@ -15,4 +13,3 @@ export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
     experimental: { passkey: true },
   },
 });
-
