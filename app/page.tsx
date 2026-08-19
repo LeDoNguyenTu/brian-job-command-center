@@ -47,6 +47,14 @@ type AppSettings = {
   last_backup_at?: string | null;
   backup_status?: string;
   backup_message?: string | null;
+  discovery_enabled?: boolean;
+  discovery_time?: string;
+  discovery_timezone?: string;
+  discovery_source_urls?: string[];
+  last_discovery_at?: string | null;
+  last_scheduled_discovery_date?: string | null;
+  discovery_status?: string;
+  discovery_message?: string | null;
 };
 
 type JobRow = {
@@ -227,6 +235,12 @@ function formatLongDate(value?: string | null) {
   }).format(new Date(`${value.slice(0, 10)}T00:00:00+08:00`));
 }
 
+function formatScheduleTime(value?: string) {
+  const [hour = 8, minute = 0] = (value || "08:00").split(":").map(Number);
+  const date = new Date(2026, 0, 1, hour, minute);
+  return new Intl.DateTimeFormat("en-SG", { hour: "numeric", minute: "2-digit" }).format(date);
+}
+
 function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -388,6 +402,12 @@ export default function Home() {
   const [notionToken, setNotionToken] = useState("");
   const [connectionMessage, setConnectionMessage] = useState("");
   const [securityBusy, setSecurityBusy] = useState(false);
+  const [discoveryEnabled, setDiscoveryEnabled] = useState(true);
+  const [discoveryTime, setDiscoveryTime] = useState("08:00");
+  const [discoveryTimezone, setDiscoveryTimezone] = useState("Asia/Singapore");
+  const [discoverySources, setDiscoverySources] = useState("");
+  const [discoveryBusy, setDiscoveryBusy] = useState(false);
+  const [discoveryMessage, setDiscoveryMessage] = useState("");
   const [passkeys, setPasskeys] = useState<Array<{ id: string; friendly_name?: string; created_at: string }>>([]);
   const [jobEditorOpen, setJobEditorOpen] = useState(false);
   const [jobDraft, setJobDraft] = useState<JobDraft>(EMPTY_JOB);
@@ -436,7 +456,12 @@ export default function Home() {
       setSaved(rows.filter((job) => job.saved).map((job) => Number(job.id)));
       setResumes((resumesResult.data ?? []) as Resume[]);
       setProfile(profileResult.data as PrivateProfile);
-      setSettings(settingsResult.data as AppSettings);
+      const nextSettings = settingsResult.data as AppSettings;
+      setSettings(nextSettings);
+      setDiscoveryEnabled(nextSettings.discovery_enabled ?? true);
+      setDiscoveryTime((nextSettings.discovery_time || "08:00").slice(0, 5));
+      setDiscoveryTimezone(nextSettings.discovery_timezone || "Asia/Singapore");
+      setDiscoverySources((nextSettings.discovery_source_urls ?? []).join("\n"));
     }
     setAuthPhase("authorized");
     setDataLoading(false);
@@ -611,6 +636,72 @@ export default function Home() {
     setConnectionMessage("Notion backup connection saved securely. Starting the first backup...");
     setSecurityBusy(false);
     await backupToNotion();
+  };
+
+  const normalizedDiscoverySources = () => discoverySources
+    .split(/\r?\n/)
+    .map((source) => source.trim())
+    .filter(Boolean);
+
+  const persistDiscoverySettings = async () => {
+    const sources = normalizedDiscoverySources();
+    const unsupported = sources.find((source) => {
+      try {
+        const host = new URL(source).hostname;
+        return !["boards.greenhouse.io", "job-boards.greenhouse.io", "boards.eu.greenhouse.io", "jobs.lever.co"].includes(host);
+      } catch {
+        return true;
+      }
+    });
+    if (unsupported) {
+      setDiscoveryMessage(`Unsupported career page: ${unsupported}. Use a public Greenhouse or Lever board URL.`);
+      return false;
+    }
+
+    const { error } = await supabase.from("app_settings").update({
+      discovery_enabled: discoveryEnabled,
+      discovery_time: discoveryTime,
+      discovery_timezone: discoveryTimezone,
+      discovery_source_urls: sources,
+      discovery_status: sources.length ? "Scheduled" : "Waiting for sources",
+      discovery_message: sources.length ? `Daily discovery is configured for ${formatScheduleTime(discoveryTime)}.` : "Add at least one supported company career page.",
+      updated_at: new Date().toISOString(),
+    }).eq("id", 1);
+    if (error) {
+      setDiscoveryMessage(error.message);
+      return false;
+    }
+    return true;
+  };
+
+  const saveDiscoverySettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setDiscoveryBusy(true);
+    setDiscoveryMessage("");
+    if (await persistDiscoverySettings()) {
+      setDiscoveryMessage("Discovery schedule and sources saved.");
+      await loadDashboard();
+    }
+    setDiscoveryBusy(false);
+  };
+
+  const fetchJobsNow = async () => {
+    setDiscoveryBusy(true);
+    setDiscoveryMessage("Checking your company career pages now...");
+    if (!(await persistDiscoverySettings())) {
+      setDiscoveryBusy(false);
+      return;
+    }
+    const { data, error } = await supabase.functions.invoke("discover-jobs", { body: { action: "manual" } });
+    if (error) {
+      setDiscoveryMessage(error.message);
+    } else if (data?.skipped) {
+      setDiscoveryMessage(data.reason || "The scan was skipped.");
+    } else {
+      setDiscoveryMessage(`${data?.inserted ?? 0} new roles added. ${data?.duplicates ?? 0} duplicates safely skipped.`);
+      await loadDashboard();
+    }
+    setDiscoveryBusy(false);
   };
 
   const openNewJob = () => {
@@ -818,6 +909,9 @@ export default function Home() {
   const daysToAvailability = profile?.available_from
     ? Math.max(0, Math.ceil((new Date(`${profile.available_from}T00:00:00+08:00`).getTime() - currentDate.getTime()) / 86_400_000))
     : 0;
+  const sourceCount = settings?.discovery_source_urls?.length ?? 0;
+  const discoveryReady = discoveryEnabled && sourceCount > 0;
+  const scheduleZone = (settings?.discovery_timezone || discoveryTimezone) === "Asia/Singapore" ? "SGT" : (settings?.discovery_timezone || discoveryTimezone);
 
   return (
     <main className={dark ? "app-shell dark" : "app-shell light"}>
@@ -898,10 +992,11 @@ export default function Home() {
             </article>
 
             <aside className="scout-card">
-              <div className="scout-header"><div className="pulse-mark"><span /></div><div><p>Job Match Scout</p><strong>Active</strong></div><span className="on-switch"><i /></span></div>
+              <div className="scout-header"><div className="pulse-mark"><span /></div><div><p>Job Match Scout</p><strong>{discoveryReady ? "Active" : discoveryEnabled ? "Setup needed" : "Paused"}</strong></div><span className={discoveryReady ? "on-switch" : "on-switch paused"}><i /></span></div>
               <div className="scan-visual"><span className="scan-line" /><div className="scan-core">⌕</div></div>
-              <div className="scan-stats"><div><strong>8</strong><span>sources</span></div><div><strong>{jobs.length}</strong><span>roles found</span></div><div><strong>{strongCount}</strong><span>strong fit</span></div></div>
-              <p className="next-scan">Next scan tomorrow at 8:00 AM</p>
+              <div className="scan-stats"><div><strong>{sourceCount}</strong><span>sources</span></div><div><strong>{jobs.length}</strong><span>roles tracked</span></div><div><strong>{strongCount}</strong><span>strong fit</span></div></div>
+              <p className="next-scan">{discoveryEnabled ? `Daily at ${formatScheduleTime(settings?.discovery_time || discoveryTime)} ${scheduleZone}` : "Automatic discovery is paused"}</p>
+              <div className="scout-actions"><button className="primary-button compact" onClick={fetchJobsNow} disabled={discoveryBusy || !sourceCount}>{discoveryBusy ? "Fetching..." : "Fetch now"}</button><button className="secondary-button" onClick={openSecurity}>Discovery settings</button></div>
             </aside>
           </section>
 
@@ -1146,13 +1241,29 @@ export default function Home() {
             <button className="modal-close" onClick={() => setSecurityOpen(false)} aria-label="Close security and connections">×</button>
             <p className="eyebrow">Private administration</p>
             <h2 id="security-title">Security and connections</h2>
-            <p className="security-intro">Manage your sign-in credentials, passkeys, optional backup, and administrator session.</p>
+            <p className="security-intro">Manage job discovery, sign-in credentials, passkeys, optional backup, and your administrator session.</p>
 
             <div className="security-account">
               <span className="security-icon">◎</span>
               <div><small>Authorized administrator</small><strong>{currentUserEmail}</strong></div>
               <span className="verified-badge">Verified only</span>
             </div>
+
+            <section className="security-panel discovery-panel">
+              <div className="security-heading"><div><p>Job discovery</p><h3>Schedule and company sources</h3></div><span className={discoveryEnabled && normalizedDiscoverySources().length ? "connection-status connected" : "connection-status"}>{discoveryEnabled ? normalizedDiscoverySources().length ? "Scheduled" : "Setup needed" : "Paused"}</span></div>
+              <p className="security-copy">The scanner checks public company career boards and saves eligible Singapore roles directly to Supabase. Paste one Greenhouse or Lever board URL per line. Repeated scans never create duplicate job records.</p>
+              <form className="discovery-form" onSubmit={saveDiscoverySettings}>
+                <label className="checkbox-field discovery-toggle"><input type="checkbox" checked={discoveryEnabled} onChange={(event) => setDiscoveryEnabled(event.target.checked)} /><span>Run automatically each day</span></label>
+                <div className="discovery-schedule-grid">
+                  <label><span>Daily time</span><input type="time" value={discoveryTime} onChange={(event) => setDiscoveryTime(event.target.value)} required /></label>
+                  <label><span>Timezone</span><select value={discoveryTimezone} onChange={(event) => setDiscoveryTimezone(event.target.value)}><option value="Asia/Singapore">Singapore - SGT</option><option value="Asia/Ho_Chi_Minh">Vietnam - ICT</option><option value="Asia/Kuala_Lumpur">Kuala Lumpur - MYT</option><option value="UTC">UTC</option></select></label>
+                </div>
+                <label><span>Company career board URLs</span><textarea rows={5} value={discoverySources} onChange={(event) => setDiscoverySources(event.target.value)} placeholder={"https://boards.greenhouse.io/company\nhttps://jobs.lever.co/company"} /></label>
+                <div className="discovery-actions"><button className="secondary-button" type="submit" disabled={discoveryBusy}>{discoveryBusy ? "Saving..." : "Save schedule"}</button><button className="primary-button compact" type="button" onClick={fetchJobsNow} disabled={discoveryBusy || !normalizedDiscoverySources().length}>{discoveryBusy ? "Fetching..." : "Fetch now"}</button></div>
+              </form>
+              <p className="connection-detail">{settings?.last_discovery_at ? `Last run: ${new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short", timeZone: settings.discovery_timezone || "Asia/Singapore" }).format(new Date(settings.last_discovery_at))}. ${settings.discovery_message || ""}` : settings?.discovery_message || "No live discovery run yet. Existing prepared records will remain until you delete them."}</p>
+              {discoveryMessage ? <p className="discovery-message" role="status">{discoveryMessage}</p> : null}
+            </section>
 
             <section className="security-panel">
               <div className="security-heading"><div><p>Account credentials</p><h3>Change email or password</h3></div></div>
