@@ -3,7 +3,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
-const ADMIN_EMAIL = "ledonguyentu@gmail.com";
 const FALLBACK_NOTION_HUB =
   "https://app.notion.com/p/cf3a242773ef4ce686fde98a41e8f63f";
 const MOM_S_PASS =
@@ -17,6 +16,8 @@ type Resume = {
   tone: string;
   notion_url: string | null;
   sort_order: number;
+  storage_path?: string | null;
+  original_filename?: string | null;
 };
 
 type PrivateProfile = {
@@ -42,6 +43,10 @@ type AppSettings = {
   last_sync_status: string;
   last_sync_message: string | null;
   auto_sync_enabled: boolean;
+  primary_data_source?: string;
+  last_backup_at?: string | null;
+  backup_status?: string;
+  backup_message?: string | null;
 };
 
 type JobRow = {
@@ -63,6 +68,14 @@ type JobRow = {
   saved: boolean;
   notion_url: string | null;
   job_url: string | null;
+  employment_type: string | null;
+  source: string | null;
+  career_page: string | null;
+  ats_platform: string | null;
+  cv_version: string | null;
+  cv_status: string | null;
+  cover_letter_status: string | null;
+  salary: string | null;
 };
 
 type Job = {
@@ -84,6 +97,66 @@ type Job = {
   approved: boolean;
   notionUrl: string | null;
   jobUrl: string | null;
+  dateFound: string | null;
+  employmentType: string | null;
+  source: string | null;
+  careerPage: string | null;
+  atsPlatform: string | null;
+  cvVersion: string | null;
+  cvStatus: string | null;
+  coverLetterStatus: string | null;
+  salary: string | null;
+};
+
+type JobDraft = {
+  id?: number;
+  company: string;
+  position: string;
+  role_track: string;
+  match_score: string;
+  match_level: "Strong" | "Review" | "Blocked";
+  sponsorship: string;
+  location: string;
+  work_mode: string;
+  date_found: string;
+  matched_skills: string;
+  gaps_risks: string;
+  pipeline: string;
+  approved_to_apply: boolean;
+  employment_type: string;
+  source: string;
+  job_url: string;
+  career_page: string;
+  ats_platform: string;
+  cv_version: string;
+  cv_status: string;
+  cover_letter_status: string;
+  salary: string;
+};
+
+const EMPTY_JOB: JobDraft = {
+  company: "",
+  position: "",
+  role_track: "Software",
+  match_score: "70",
+  match_level: "Review",
+  sponsorship: "Unknown",
+  location: "Singapore",
+  work_mode: "Not specified",
+  date_found: new Date().toISOString().slice(0, 10),
+  matched_skills: "",
+  gaps_risks: "",
+  pipeline: "Discovered",
+  approved_to_apply: false,
+  employment_type: "Full-time",
+  source: "Company career page",
+  job_url: "",
+  career_page: "",
+  ats_platform: "",
+  cv_version: "",
+  cv_status: "Not started",
+  cover_letter_status: "Not started",
+  salary: "",
 };
 
 function initials(company: string) {
@@ -132,6 +205,15 @@ function mapJob(row: JobRow): Job {
     approved: row.approved_to_apply,
     notionUrl: row.notion_url,
     jobUrl: row.job_url,
+    dateFound: row.date_found,
+    employmentType: row.employment_type,
+    source: row.source,
+    careerPage: row.career_page,
+    atsPlatform: row.ats_platform,
+    cvVersion: row.cv_version,
+    cvStatus: row.cv_status,
+    coverLetterStatus: row.cover_letter_status,
+    salary: row.salary,
   };
 }
 
@@ -146,7 +228,7 @@ function formatLongDate(value?: string | null) {
 }
 
 function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [mode, setMode] = useState<"signin" | "setup">("signin");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -157,29 +239,34 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
     event.preventDefault();
     setError("");
     setMessage("");
-    if (mode === "setup" && password.length < 12) {
-      setError("Use at least 12 characters for the administrator password.");
+    if (!email.trim()) {
+      setError("Enter your administrator email address.");
       return;
     }
 
     setBusy(true);
-    if (mode === "setup") {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email: ADMIN_EMAIL,
-        password,
-        options: { emailRedirectTo: window.location.origin },
-      });
-      if (signUpError) setError(signUpError.message);
-      else if (data.session) onAuthenticated();
-      else setMessage(`A confirmation link was sent to ${ADMIN_EMAIL}. Open it, then return here to sign in.`);
-    } else {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: ADMIN_EMAIL,
-        password,
-      });
-      if (signInError) setError(signInError.message);
-      else onAuthenticated();
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    if (signInError) setError(signInError.message);
+    else onAuthenticated();
+    setBusy(false);
+  };
+
+  const resetPassword = async () => {
+    setError("");
+    setMessage("");
+    if (!email.trim()) {
+      setError("Enter your email address first.");
+      return;
     }
+    setBusy(true);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo: window.location.origin,
+    });
+    if (resetError) setError(resetError.message);
+    else setMessage("Password reset instructions were sent if this email belongs to the administrator account.");
     setBusy(false);
   };
 
@@ -200,24 +287,22 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
         <div className="auth-brand"><span className="brand-mark">B</span><div><strong>BRIAN</strong><small>Job Command Center</small></div></div>
         <div className="auth-lock">Private admin portal</div>
         <p className="eyebrow">Supabase protected</p>
-        <h1 id="auth-title">{mode === "signin" ? "Welcome back, Brian." : "Create your admin account."}</h1>
-        <p className="auth-copy">Only the confirmed administrator account can access this private dashboard and its data.</p>
+        <h1 id="auth-title">Welcome back.</h1>
+        <p className="auth-copy">Enter the administrator account credentials to open the private dashboard.</p>
 
         <form className="auth-form" onSubmit={submitPassword}>
-          <label><span>Administrator email</span><input type="email" value={ADMIN_EMAIL} readOnly /></label>
-          <label><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === "signin" ? "current-password" : "new-password"} placeholder="Enter your private password" required /></label>
+          <label><span>Email address</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="you@example.com" required /></label>
+          <label><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" placeholder="Enter your private password" required /></label>
           {error ? <p className="auth-message error" role="alert">{error}</p> : null}
           {message ? <p className="auth-message success" role="status">{message}</p> : null}
-          <button className="primary-button auth-primary" disabled={busy}>{busy ? "Please wait" : mode === "signin" ? "Sign in securely" : "Create admin account"}</button>
+          <button className="primary-button auth-primary" disabled={busy}>{busy ? "Please wait" : "Sign in securely"}</button>
         </form>
 
         <div className="auth-divider"><span>or</span></div>
         <button className="passkey-button" onClick={signInWithPasskey} disabled={busy || !passkeySupported}><span>◎</span> Sign in with a passkey</button>
         {!passkeySupported ? <p className="auth-hint">This browser does not support passkeys.</p> : <p className="auth-hint">Passkey sign-in works after you register one from Security and connections.</p>}
 
-        <button className="auth-mode" onClick={() => { setMode((value) => value === "signin" ? "setup" : "signin"); setError(""); setMessage(""); }}>
-          {mode === "signin" ? "First visit? Create the admin account" : "Already created it? Sign in"}
-        </button>
+        <button className="auth-mode" onClick={resetPassword} disabled={busy}>Forgot password?</button>
         <div className="auth-trust"><span>Encrypted database</span><span>Row-level security</span><span>Independent login</span></div>
       </section>
     </main>
@@ -295,10 +380,24 @@ export default function Home() {
   const [financialSector, setFinancialSector] = useState(false);
   const [copied, setCopied] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [currentUserEmail, setCurrentUserEmail] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [notionToken, setNotionToken] = useState("");
   const [connectionMessage, setConnectionMessage] = useState("");
   const [securityBusy, setSecurityBusy] = useState(false);
   const [passkeys, setPasskeys] = useState<Array<{ id: string; friendly_name?: string; created_at: string }>>([]);
+  const [jobEditorOpen, setJobEditorOpen] = useState(false);
+  const [jobDraft, setJobDraft] = useState<JobDraft>(EMPTY_JOB);
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const [profileDraft, setProfileDraft] = useState<PrivateProfile | null>(null);
+  const [resumeEditorOpen, setResumeEditorOpen] = useState(false);
+  const [resumeDraft, setResumeDraft] = useState<Resume | null>(null);
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [editorBusy, setEditorBusy] = useState(false);
+  const [editorMessage, setEditorMessage] = useState("");
   const [currentDate] = useState(() => new Date());
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -306,24 +405,20 @@ export default function Home() {
     setDataLoading(true);
     setDataError("");
     const { data: userData, error: userError } = await supabase.auth.getUser();
-    const email = userData.user?.email?.toLowerCase();
     if (userError || !userData.user) {
       setAuthPhase("signed_out");
       setDataLoading(false);
       return;
     }
-    if (email !== ADMIN_EMAIL) {
-      setAuthPhase("denied");
-      setDataLoading(false);
-      return;
-    }
-
     const { data: isAdmin, error: adminError } = await supabase.rpc("is_current_admin");
     if (adminError || isAdmin !== true) {
       setAuthPhase("denied");
       setDataLoading(false);
       return;
     }
+
+    setCurrentUserEmail(userData.user.email || "");
+    setAccountEmail(userData.user.email || "");
 
     const [jobsResult, resumesResult, profileResult, settingsResult] = await Promise.all([
       supabase.from("jobs").select("*").order("match_score", { ascending: false }).order("date_found", { ascending: false }),
@@ -409,7 +504,55 @@ export default function Home() {
   const openSecurity = async () => {
     setSecurityOpen(true);
     setConnectionMessage("");
+    const { data } = await supabase.auth.getUser();
+    const email = data.user?.email || "";
+    setCurrentUserEmail(email);
+    setAccountEmail(email);
     await refreshPasskeys();
+  };
+
+  const updateEmail = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalized = accountEmail.trim().toLowerCase();
+    if (!normalized || normalized === currentUserEmail.toLowerCase()) {
+      setConnectionMessage("Enter a different valid email address.");
+      return;
+    }
+    setSecurityBusy(true);
+    setConnectionMessage("");
+    const { error } = await supabase.auth.updateUser(
+      { email: normalized },
+      { emailRedirectTo: window.location.origin },
+    );
+    if (error) setConnectionMessage(error.message);
+    else setConnectionMessage("Email change requested. Confirm the messages sent by Supabase, then sign in with the new address.");
+    setSecurityBusy(false);
+  };
+
+  const updatePassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (newPassword.length < 12) {
+      setConnectionMessage("Use at least 12 characters for the new password.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setConnectionMessage("The new passwords do not match.");
+      return;
+    }
+    setSecurityBusy(true);
+    setConnectionMessage("");
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+      current_password: currentPassword,
+    });
+    if (error) setConnectionMessage(error.message);
+    else {
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setConnectionMessage("Password updated successfully.");
+    }
+    setSecurityBusy(false);
   };
 
   const registerPasskey = async () => {
@@ -435,14 +578,14 @@ export default function Home() {
     setSecurityBusy(false);
   };
 
-  const syncNotion = async () => {
+  const backupToNotion = async () => {
     setSecurityBusy(true);
-    setConnectionMessage("Synchronizing the live Notion tracker...");
-    const { data, error } = await supabase.functions.invoke("sync-notion", { body: {} });
+    setConnectionMessage("Backing up Supabase records to Notion...");
+    const { data, error } = await supabase.functions.invoke("sync-notion", { body: { action: "backup" } });
     if (error) setConnectionMessage(error.message);
     else {
-      const count = typeof data?.synced === "number" ? data.synced : 0;
-      setConnectionMessage(`${count} Notion records synchronized.`);
+      const count = typeof data?.backed_up === "number" ? data.backed_up : 0;
+      setConnectionMessage(`${count} Supabase records backed up to Notion.`);
       await loadDashboard();
     }
     setSecurityBusy(false);
@@ -465,9 +608,191 @@ export default function Home() {
       setSecurityBusy(false);
       return;
     }
-    setConnectionMessage("Notion connection saved securely. Starting the first sync...");
+    setConnectionMessage("Notion backup connection saved securely. Starting the first backup...");
     setSecurityBusy(false);
-    await syncNotion();
+    await backupToNotion();
+  };
+
+  const openNewJob = () => {
+    setJobDraft({ ...EMPTY_JOB, date_found: new Date().toISOString().slice(0, 10) });
+    setEditorMessage("");
+    setJobEditorOpen(true);
+  };
+
+  const openJobEditor = (job: Job) => {
+    setSelectedJob(null);
+    setJobDraft({
+      id: job.id,
+      company: job.company,
+      position: job.role,
+      role_track: job.track,
+      match_score: String(job.score),
+      match_level: job.match,
+      sponsorship: job.sponsorship,
+      location: job.location,
+      work_mode: job.mode,
+      date_found: job.dateFound || "",
+      matched_skills: job.tags.join(", "),
+      gaps_risks: job.note,
+      pipeline: job.pipeline,
+      approved_to_apply: job.approved,
+      employment_type: job.employmentType || "",
+      source: job.source || "",
+      job_url: job.jobUrl || "",
+      career_page: job.careerPage || "",
+      ats_platform: job.atsPlatform || "",
+      cv_version: job.cvVersion || "",
+      cv_status: job.cvStatus || "Not started",
+      cover_letter_status: job.coverLetterStatus || "Not started",
+      salary: job.salary || "",
+    });
+    setEditorMessage("");
+    setJobEditorOpen(true);
+  };
+
+  const saveJob = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!jobDraft.company.trim() || !jobDraft.position.trim()) {
+      setEditorMessage("Company and position are required.");
+      return;
+    }
+    setEditorBusy(true);
+    setEditorMessage("");
+    const payload = {
+      company: jobDraft.company.trim(),
+      position: jobDraft.position.trim(),
+      role_track: jobDraft.role_track.trim() || "Other",
+      match_score: Math.max(0, Math.min(100, Number(jobDraft.match_score) || 0)),
+      match_level: jobDraft.match_level,
+      sponsorship: jobDraft.sponsorship.trim() || "Unknown",
+      location: jobDraft.location.trim() || "Singapore",
+      work_mode: jobDraft.work_mode.trim() || "Not specified",
+      date_found: jobDraft.date_found || null,
+      matched_skills: jobDraft.matched_skills.split(",").map((item) => item.trim()).filter(Boolean),
+      gaps_risks: jobDraft.gaps_risks.trim() || null,
+      pipeline: jobDraft.pipeline.trim() || "Discovered",
+      approved_to_apply: jobDraft.approved_to_apply,
+      employment_type: jobDraft.employment_type.trim() || null,
+      source: jobDraft.source.trim() || "Manual entry",
+      job_url: jobDraft.job_url.trim() || null,
+      career_page: jobDraft.career_page.trim() || null,
+      ats_platform: jobDraft.ats_platform.trim() || null,
+      cv_version: jobDraft.cv_version.trim() || null,
+      cv_status: jobDraft.cv_status.trim() || null,
+      cover_letter_status: jobDraft.cover_letter_status.trim() || null,
+      salary: jobDraft.salary.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+    const result = jobDraft.id
+      ? await supabase.from("jobs").update(payload).eq("id", jobDraft.id)
+      : await supabase.from("jobs").insert(payload);
+    if (result.error) setEditorMessage(result.error.message);
+    else {
+      setJobEditorOpen(false);
+      await loadDashboard();
+    }
+    setEditorBusy(false);
+  };
+
+  const deleteJob = async () => {
+    if (!jobDraft.id || !window.confirm("Delete this job record from Supabase?")) return;
+    setEditorBusy(true);
+    const { error } = await supabase.from("jobs").delete().eq("id", jobDraft.id);
+    if (error) setEditorMessage(error.message);
+    else {
+      setJobEditorOpen(false);
+      await loadDashboard();
+    }
+    setEditorBusy(false);
+  };
+
+  const openProfileEditor = () => {
+    if (!profile) return;
+    setProfileDraft({ ...profile, languages: [...profile.languages] });
+    setEditorMessage("");
+    setProfileEditorOpen(true);
+  };
+
+  const saveProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!profileDraft) return;
+    setEditorBusy(true);
+    const { error } = await supabase.from("private_profile").update({
+      ...profileDraft,
+      notion_url: profileDraft.notion_url || null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", 1);
+    if (error) setEditorMessage(error.message);
+    else {
+      setProfileEditorOpen(false);
+      await loadDashboard();
+    }
+    setEditorBusy(false);
+  };
+
+  const openResumeEditor = (resume: Resume) => {
+    setResumeDraft({ ...resume });
+    setResumeFile(null);
+    setEditorMessage("");
+    setResumeEditorOpen(true);
+  };
+
+  const downloadResume = async (resume: Resume) => {
+    if (!resume.storage_path) return;
+    setDataError("");
+    const { data, error } = await supabase.storage.from("resume-files").createSignedUrl(resume.storage_path, 60);
+    if (error || !data?.signedUrl) {
+      setDataError(error?.message || "The resume file could not be opened.");
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const saveResume = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!resumeDraft) return;
+    setEditorBusy(true);
+    setEditorMessage("");
+    let storagePath = resumeDraft.storage_path || null;
+    let originalFilename = resumeDraft.original_filename || null;
+
+    if (resumeFile) {
+      const safeFilename = resumeFile.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+      const nextPath = `${resumeDraft.code}/${Date.now()}-${safeFilename}`;
+      const { error: uploadError } = await supabase.storage.from("resume-files").upload(nextPath, resumeFile, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+      if (uploadError) {
+        setEditorMessage(uploadError.message);
+        setEditorBusy(false);
+        return;
+      }
+      storagePath = nextPath;
+      originalFilename = resumeFile.name;
+    }
+
+    const { error } = await supabase.from("resumes").update({
+      name: resumeDraft.name.trim(),
+      fit: resumeDraft.fit.trim(),
+      recommendation: resumeDraft.recommendation.trim(),
+      storage_path: storagePath,
+      original_filename: originalFilename,
+      updated_at: new Date().toISOString(),
+    }).eq("code", resumeDraft.code);
+    if (error) {
+      if (resumeFile && storagePath) await supabase.storage.from("resume-files").remove([storagePath]);
+      setEditorMessage(error.message);
+    }
+    else {
+      if (resumeFile && resumeDraft.storage_path && resumeDraft.storage_path !== storagePath) {
+        await supabase.storage.from("resume-files").remove([resumeDraft.storage_path]);
+      }
+      setResumeEditorOpen(false);
+      setResumeFile(null);
+      await loadDashboard();
+    }
+    setEditorBusy(false);
   };
 
   const signOut = async () => {
@@ -481,7 +806,7 @@ export default function Home() {
   }
   if (authPhase === "signed_out") return <AuthScreen onAuthenticated={loadDashboard} />;
   if (authPhase === "denied") {
-    return <main className="auth-shell"><section className="auth-card denied-card"><p className="eyebrow">Access denied</p><h1>This account is not authorized.</h1><p className="auth-copy">Only {ADMIN_EMAIL} can open this dashboard.</p><button className="primary-button auth-primary" onClick={signOut}>Sign out</button></section></main>;
+    return <main className="auth-shell"><section className="auth-card denied-card"><p className="eyebrow">Access denied</p><h1>This account is not authorized.</h1><p className="auth-copy">Sign in with the administrator account linked to this dashboard.</p><button className="primary-button auth-primary" onClick={signOut}>Sign out</button></section></main>;
   }
 
   const notionHub = settings?.notion_hub_url || FALLBACK_NOTION_HUB;
@@ -516,7 +841,7 @@ export default function Home() {
             <span className="privacy-dot" />
             <div><strong>Admin protected</strong><small>Supabase RLS active</small></div>
           </div>
-          <a className="notion-link" href={notionHub} target="_blank" rel="noreferrer">Open Notion <span>↗</span></a>
+          <button className="notion-link" onClick={openSecurity}>Backup settings <span>›</span></button>
         </div>
       </aside>
 
@@ -549,7 +874,7 @@ export default function Home() {
             <article className="stat-card featured"><div className="stat-top"><span className="stat-icon">✦</span><span className="trend">Live score</span></div><strong>{strongCount}</strong><p>Strong {strongCount === 1 ? "match" : "matches"}</p></article>
             <article className="stat-card"><div className="stat-top"><span className="stat-icon cyan-icon">◫</span><span className="muted-label">Needs you</span></div><strong>{reviewCount}</strong><p>Review queue</p></article>
             <article className="stat-card"><div className="stat-top"><span className="stat-icon amber-icon">!</span><span className="muted-label">Filtered safely</span></div><strong>{blockedCount}</strong><p>Blocked roles</p></article>
-            <article className="stat-card"><div className="stat-top"><span className="stat-icon green-icon">↻</span><span className={settings?.notion_connected ? "live-label" : "muted-label"}><i /> {settings?.notion_connected ? "Connected" : "Setup needed"}</span></div><strong className="time-stat">08:00</strong><p>Daily scout</p></article>
+            <article className="stat-card"><div className="stat-top"><span className="stat-icon green-icon">↻</span><span className="live-label"><i /> Live</span></div><strong className="time-stat">{jobs.length}</strong><p>Supabase records</p></article>
           </section>
 
           <section className="focus-grid">
@@ -557,7 +882,7 @@ export default function Home() {
               <div className="focus-copy">
                 <div className="section-kicker"><span>Top opportunity</span><span className="fresh-pill">{topJob?.found || "Waiting"}</span></div>
                 <p className="company-name">{topJob?.company.toUpperCase() || "LIVE PIPELINE"}</p>
-                <h2>{topJob?.role || "Connect Notion to load opportunities"}</h2>
+                <h2>{topJob?.role || "Add your first opportunity"}</h2>
                 <p className="focus-description">{topJob?.note || "Your private Supabase database is ready for live job records."}</p>
                 <div className="focus-tags">{topJob?.tags.length ? topJob.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>No skills loaded yet</span>}</div>
                 <div className="focus-actions">
@@ -567,7 +892,7 @@ export default function Home() {
               </div>
               <div className="focus-visual" aria-label={`${topJob?.score || 0} percent match`}>
                 <div className="orbital orbital-one" /><div className="orbital orbital-two" />
-                <div className="hero-score"><span>AI MATCH</span><strong>{topJob?.score || 0}</strong><small>out of 100</small></div>
+                <div className="hero-score"><span>FIT SCORE</span><strong>{topJob?.score || 0}</strong><small>out of 100</small></div>
                 <div className="fit-chip fit-one">{topJob?.track || "Role fit"}</div><div className="fit-chip fit-two">{topJob?.match || "Pending"}</div><div className="risk-chip">Sponsorship {topJob?.sponsorship.toLowerCase() || "unknown"}</div>
               </div>
             </article>
@@ -583,7 +908,7 @@ export default function Home() {
           <section id="pipeline" className="pipeline-section">
             <div className="section-heading">
               <div><p className="eyebrow">Smart review queue</p><h2>Opportunity pipeline</h2></div>
-              <a href={notionHub} target="_blank" rel="noreferrer" className="text-link">Live tracker in Notion <span>↗</span></a>
+              <button className="primary-button compact" onClick={openNewJob}>Add opportunity</button>
             </div>
             <div className="filter-row">
               <div className="filter-tabs" role="tablist" aria-label="Filter jobs">
@@ -620,7 +945,10 @@ export default function Home() {
                       <p>{resume.fit}</p>
                       <small>{resume.recommendation}</small>
                     </div>
-                    <a href={resume.notion_url || notionHub} target="_blank" rel="noreferrer" className="resume-open" aria-label={`Edit ${resume.name} resume in Notion`}>↗</a>
+                    <div className="resume-actions">
+                      {resume.storage_path ? <button className="resume-open" onClick={() => downloadResume(resume)} aria-label={`Download ${resume.name} resume`}>↓</button> : null}
+                      <button className="resume-open" onClick={() => openResumeEditor(resume)} aria-label={`Edit ${resume.name} resume`}>✎</button>
+                    </div>
                   </article>
                 ))}
                 <div className="truth-rule"><span>✓</span><p><strong>Truth-locked tailoring</strong>No invented experience, certification, language, or employment claim.</p></div>
@@ -654,7 +982,7 @@ export default function Home() {
           <section id="profile" className="profile-section">
             <div className="section-heading">
               <div><p className="eyebrow">Private profile</p><h2>Application facts, protected</h2></div>
-              <div className="owner-lock"><span>●</span> Confirmed admin only</div>
+              <button className="primary-button compact" onClick={openProfileEditor}>Edit profile</button>
             </div>
 
             <div className="profile-layout">
@@ -675,7 +1003,7 @@ export default function Home() {
                 <div className="identity-footer">
                   <span>Mandarin: {profile?.mandarin_proficiency ? "proficient" : "no proficiency"}</span><span>Citizen or PR: {profile?.singapore_citizen_or_pr ? "yes" : "no"}</span><span>Sponsorship: {profile?.sponsorship_required ? "required" : "not required"}</span>
                 </div>
-                <a className="profile-link" href={profile?.notion_url || notionHub} target="_blank" rel="noreferrer">Open editable private profile in Notion <span>↗</span></a>
+                <button className="profile-link" onClick={openProfileEditor}>Edit profile in this dashboard <span>›</span></button>
               </article>
 
               <aside className="readiness-column">
@@ -694,7 +1022,7 @@ export default function Home() {
             </div>
           </section>
 
-          <footer><p>Notion is the live source of truth. Supabase stores the protected dashboard and synchronization state.</p><span>Private • Admin-only access</span></footer>
+          <footer><p>Supabase is the live source of truth. Notion is an optional backup you control.</p><span>Private • Admin-only access</span></footer>
         </div>
       </section>
 
@@ -711,8 +1039,103 @@ export default function Home() {
               <div><span>✓</span><p><strong>Location</strong>Singapore</p></div>
               <div className={selectedJob.match === "Blocked" ? "warning" : ""}><span>{selectedJob.match === "Blocked" ? "!" : "?"}</span><p><strong>Next check</strong>{selectedJob.match === "Blocked" ? "Language requirement blocks this role" : "Confirm employer sponsorship"}</p></div>
             </div>
-            <a className="primary-button full" href={selectedJob.notionUrl || selectedJob.jobUrl || notionHub} target="_blank" rel="noreferrer">Open live job record <span>↗</span></a>
+            <div className="modal-actions">
+              <button className="primary-button" onClick={() => openJobEditor(selectedJob)}>Edit in dashboard</button>
+              {selectedJob.jobUrl ? <a className="secondary-button" href={selectedJob.jobUrl} target="_blank" rel="noreferrer">Open job listing ↗</a> : null}
+            </div>
             <p className="approval-note">No application is submitted without your approval.</p>
+          </section>
+        </div>
+      ) : null}
+
+      {jobEditorOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setJobEditorOpen(false)}>
+          <section className="editor-modal" role="dialog" aria-modal="true" aria-labelledby="job-editor-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close" onClick={() => setJobEditorOpen(false)} aria-label="Close job editor">×</button>
+            <p className="eyebrow">Supabase record</p>
+            <h2 id="job-editor-title">{jobDraft.id ? "Edit opportunity" : "Add opportunity"}</h2>
+            <p className="editor-intro">Changes are saved directly to your private database.</p>
+            <form className="editor-form" onSubmit={saveJob}>
+              <div className="editor-grid two-column">
+                <label><span>Company</span><input value={jobDraft.company} onChange={(event) => setJobDraft({ ...jobDraft, company: event.target.value })} required /></label>
+                <label><span>Position</span><input value={jobDraft.position} onChange={(event) => setJobDraft({ ...jobDraft, position: event.target.value })} required /></label>
+                <label><span>Role track</span><input value={jobDraft.role_track} onChange={(event) => setJobDraft({ ...jobDraft, role_track: event.target.value })} /></label>
+                <label><span>Date found</span><input type="date" value={jobDraft.date_found} onChange={(event) => setJobDraft({ ...jobDraft, date_found: event.target.value })} /></label>
+                <label><span>Match level</span><select value={jobDraft.match_level} onChange={(event) => setJobDraft({ ...jobDraft, match_level: event.target.value as JobDraft["match_level"] })}><option>Strong</option><option>Review</option><option>Blocked</option></select></label>
+                <label><span>Match score</span><input type="number" min="0" max="100" value={jobDraft.match_score} onChange={(event) => setJobDraft({ ...jobDraft, match_score: event.target.value })} /></label>
+                <label><span>Pipeline status</span><select value={jobDraft.pipeline} onChange={(event) => setJobDraft({ ...jobDraft, pipeline: event.target.value })}><option>Discovered</option><option>Review</option><option>Preparing</option><option>Applied</option><option>Interview</option><option>Offer</option><option>Rejected</option><option>Blocked</option></select></label>
+                <label><span>Sponsorship</span><select value={jobDraft.sponsorship} onChange={(event) => setJobDraft({ ...jobDraft, sponsorship: event.target.value })}><option>Unknown</option><option>Available</option><option>Possible</option><option>Not available</option></select></label>
+                <label><span>Location</span><input value={jobDraft.location} onChange={(event) => setJobDraft({ ...jobDraft, location: event.target.value })} /></label>
+                <label><span>Work mode</span><select value={jobDraft.work_mode} onChange={(event) => setJobDraft({ ...jobDraft, work_mode: event.target.value })}><option>Not specified</option><option>On-site</option><option>Hybrid</option><option>Remote</option></select></label>
+                <label><span>Employment type</span><input value={jobDraft.employment_type} onChange={(event) => setJobDraft({ ...jobDraft, employment_type: event.target.value })} /></label>
+                <label><span>Source</span><input value={jobDraft.source} onChange={(event) => setJobDraft({ ...jobDraft, source: event.target.value })} /></label>
+                <label><span>Job URL</span><input type="url" value={jobDraft.job_url} onChange={(event) => setJobDraft({ ...jobDraft, job_url: event.target.value })} placeholder="https://" /></label>
+                <label><span>Career page</span><input type="url" value={jobDraft.career_page} onChange={(event) => setJobDraft({ ...jobDraft, career_page: event.target.value })} placeholder="https://" /></label>
+                <label><span>ATS platform</span><input value={jobDraft.ats_platform} onChange={(event) => setJobDraft({ ...jobDraft, ats_platform: event.target.value })} placeholder="Workday, Greenhouse, Lever..." /></label>
+                <label><span>Expected salary</span><input value={jobDraft.salary} onChange={(event) => setJobDraft({ ...jobDraft, salary: event.target.value })} placeholder="S$3,300" /></label>
+                <label><span>CV version</span><input value={jobDraft.cv_version} onChange={(event) => setJobDraft({ ...jobDraft, cv_version: event.target.value })} /></label>
+                <label><span>CV status</span><select value={jobDraft.cv_status} onChange={(event) => setJobDraft({ ...jobDraft, cv_status: event.target.value })}><option>Not started</option><option>Drafting</option><option>Ready</option><option>Submitted</option></select></label>
+                <label><span>Cover letter status</span><select value={jobDraft.cover_letter_status} onChange={(event) => setJobDraft({ ...jobDraft, cover_letter_status: event.target.value })}><option>Not started</option><option>Drafting</option><option>Ready</option><option>Submitted</option><option>Not required</option></select></label>
+                <label className="checkbox-field"><input type="checkbox" checked={jobDraft.approved_to_apply} onChange={(event) => setJobDraft({ ...jobDraft, approved_to_apply: event.target.checked })} /><span>Approved to apply</span></label>
+              </div>
+              <label><span>Matched skills, separated by commas</span><input value={jobDraft.matched_skills} onChange={(event) => setJobDraft({ ...jobDraft, matched_skills: event.target.value })} /></label>
+              <label><span>Notes and risks</span><textarea value={jobDraft.gaps_risks} onChange={(event) => setJobDraft({ ...jobDraft, gaps_risks: event.target.value })} rows={4} /></label>
+              {editorMessage ? <p className="editor-message">{editorMessage}</p> : null}
+              <div className="editor-actions">
+                {jobDraft.id ? <button type="button" className="danger-button" onClick={deleteJob} disabled={editorBusy}>Delete record</button> : <span />}
+                <button type="button" className="secondary-button" onClick={() => setJobEditorOpen(false)}>Cancel</button>
+                <button className="primary-button" disabled={editorBusy}>{editorBusy ? "Saving..." : "Save to Supabase"}</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {profileEditorOpen && profileDraft ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setProfileEditorOpen(false)}>
+          <section className="editor-modal compact-editor" role="dialog" aria-modal="true" aria-labelledby="profile-editor-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close" onClick={() => setProfileEditorOpen(false)} aria-label="Close profile editor">×</button>
+            <p className="eyebrow">Private Supabase profile</p>
+            <h2 id="profile-editor-title">Edit application facts</h2>
+            <form className="editor-form" onSubmit={saveProfile}>
+              <div className="editor-grid two-column">
+                <label><span>Full name</span><input value={profileDraft.full_name} onChange={(event) => setProfileDraft({ ...profileDraft, full_name: event.target.value })} /></label>
+                <label><span>Preferred name</span><input value={profileDraft.preferred_name} onChange={(event) => setProfileDraft({ ...profileDraft, preferred_name: event.target.value })} /></label>
+                <label><span>Date of birth</span><input type="date" value={profileDraft.date_of_birth} onChange={(event) => setProfileDraft({ ...profileDraft, date_of_birth: event.target.value })} /></label>
+                <label><span>Nationality</span><input value={profileDraft.nationality} onChange={(event) => setProfileDraft({ ...profileDraft, nationality: event.target.value })} /></label>
+                <label><span>Current pass</span><input value={profileDraft.current_pass} onChange={(event) => setProfileDraft({ ...profileDraft, current_pass: event.target.value })} /></label>
+                <label><span>Pass expiry</span><input type="date" value={profileDraft.pass_expiry} onChange={(event) => setProfileDraft({ ...profileDraft, pass_expiry: event.target.value })} /></label>
+                <label><span>Available from</span><input type="date" value={profileDraft.available_from} onChange={(event) => setProfileDraft({ ...profileDraft, available_from: event.target.value })} /></label>
+                <label><span>Location</span><input value={profileDraft.location} onChange={(event) => setProfileDraft({ ...profileDraft, location: event.target.value })} /></label>
+              </div>
+              <label><span>Languages, separated by commas</span><input value={profileDraft.languages.join(", ")} onChange={(event) => setProfileDraft({ ...profileDraft, languages: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label>
+              <div className="toggle-grid">
+                <label className="checkbox-field"><input type="checkbox" checked={profileDraft.mandarin_proficiency} onChange={(event) => setProfileDraft({ ...profileDraft, mandarin_proficiency: event.target.checked })} /><span>Mandarin proficient</span></label>
+                <label className="checkbox-field"><input type="checkbox" checked={profileDraft.singapore_citizen_or_pr} onChange={(event) => setProfileDraft({ ...profileDraft, singapore_citizen_or_pr: event.target.checked })} /><span>Singapore citizen or PR</span></label>
+                <label className="checkbox-field"><input type="checkbox" checked={profileDraft.sponsorship_required} onChange={(event) => setProfileDraft({ ...profileDraft, sponsorship_required: event.target.checked })} /><span>Sponsorship required</span></label>
+              </div>
+              {editorMessage ? <p className="editor-message">{editorMessage}</p> : null}
+              <div className="editor-actions"><span /><button type="button" className="secondary-button" onClick={() => setProfileEditorOpen(false)}>Cancel</button><button className="primary-button" disabled={editorBusy}>Save profile</button></div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {resumeEditorOpen && resumeDraft ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setResumeEditorOpen(false)}>
+          <section className="editor-modal compact-editor" role="dialog" aria-modal="true" aria-labelledby="resume-editor-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close" onClick={() => setResumeEditorOpen(false)} aria-label="Close resume editor">×</button>
+            <p className="eyebrow">Resume profile {resumeDraft.code}</p>
+            <h2 id="resume-editor-title">Edit resume details</h2>
+            <form className="editor-form" onSubmit={saveResume}>
+              <label><span>Name</span><input value={resumeDraft.name} onChange={(event) => setResumeDraft({ ...resumeDraft, name: event.target.value })} /></label>
+              <label><span>Best fit</span><textarea rows={3} value={resumeDraft.fit} onChange={(event) => setResumeDraft({ ...resumeDraft, fit: event.target.value })} /></label>
+              <label><span>Recommendation</span><textarea rows={3} value={resumeDraft.recommendation} onChange={(event) => setResumeDraft({ ...resumeDraft, recommendation: event.target.value })} /></label>
+              <label className="file-field"><span>Resume document</span><input type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setResumeFile(event.target.files?.[0] || null)} /></label>
+              <p className="editor-note">{resumeFile ? `${resumeFile.name} will replace the current file.` : resumeDraft.original_filename ? `Current private file: ${resumeDraft.original_filename}` : "Upload an editable DOCX or a PDF. Files stay private and require your administrator session."}</p>
+              {editorMessage ? <p className="editor-message">{editorMessage}</p> : null}
+              <div className="editor-actions"><span />{resumeDraft.storage_path ? <button type="button" className="secondary-button" onClick={() => downloadResume(resumeDraft)}>Download current</button> : null}<button type="button" className="secondary-button" onClick={() => setResumeEditorOpen(false)}>Cancel</button><button className="primary-button" disabled={editorBusy}>{editorBusy ? "Saving..." : "Save resume"}</button></div>
+            </form>
           </section>
         </div>
       ) : null}
@@ -723,13 +1146,28 @@ export default function Home() {
             <button className="modal-close" onClick={() => setSecurityOpen(false)} aria-label="Close security and connections">×</button>
             <p className="eyebrow">Private administration</p>
             <h2 id="security-title">Security and connections</h2>
-            <p className="security-intro">Manage passkeys, the live Notion connection, and your administrator session.</p>
+            <p className="security-intro">Manage your sign-in credentials, passkeys, optional backup, and administrator session.</p>
 
             <div className="security-account">
               <span className="security-icon">◎</span>
-              <div><small>Authorized administrator</small><strong>{ADMIN_EMAIL}</strong></div>
+              <div><small>Authorized administrator</small><strong>{currentUserEmail}</strong></div>
               <span className="verified-badge">Verified only</span>
             </div>
+
+            <section className="security-panel">
+              <div className="security-heading"><div><p>Account credentials</p><h3>Change email or password</h3></div></div>
+              <p className="security-copy">Email changes require confirmation. Your administrator access follows the same account, so changing the address will not disconnect your data.</p>
+              <form className="credential-form" onSubmit={updateEmail}>
+                <label><span>Sign-in email</span><input type="email" value={accountEmail} onChange={(event) => setAccountEmail(event.target.value)} autoComplete="email" required /></label>
+                <button className="secondary-button" disabled={securityBusy}>Update email</button>
+              </form>
+              <form className="credential-form password-grid" onSubmit={updatePassword}>
+                <label><span>Current password</span><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" required /></label>
+                <label><span>New password</span><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={12} required /></label>
+                <label><span>Confirm new password</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={12} required /></label>
+                <button className="primary-button compact" disabled={securityBusy}>Update password</button>
+              </form>
+            </section>
 
             <section className="security-panel">
               <div className="security-heading"><div><p>Passkey authentication</p><h3>Phishing-resistant sign-in</h3></div><button className="primary-button compact" onClick={registerPasskey} disabled={securityBusy}>Add passkey</button></div>
@@ -742,17 +1180,17 @@ export default function Home() {
             </section>
 
             <section className="security-panel">
-              <div className="security-heading"><div><p>Live data source</p><h3>Notion Applications tracker</h3></div><span className={settings?.notion_connected ? "connection-status connected" : "connection-status"}>{settings?.notion_connected ? "Connected" : "Not connected"}</span></div>
-              <p className="security-copy">Enter the Notion integration token here, never in chat. It is encrypted in Supabase Vault and used only by the protected synchronization function.</p>
+              <div className="security-heading"><div><p>Optional backup</p><h3>Notion Applications backup</h3></div><span className={settings?.notion_connected ? "connection-status connected" : "connection-status"}>{settings?.notion_connected ? "Ready" : "Not configured"}</span></div>
+              <p className="security-copy">Supabase is your live database. Connect Notion only if you want an additional backup copy. Normal editing and tracking stay inside this website.</p>
               <form className="connection-form" onSubmit={connectNotion}>
                 <input type="password" value={notionToken} onChange={(event) => setNotionToken(event.target.value)} placeholder="Paste Notion integration token" autoComplete="off" aria-label="Notion integration token" />
-                <button className="primary-button compact" disabled={securityBusy}>Save connection</button>
+                <button className="primary-button compact" disabled={securityBusy}>Save backup connection</button>
               </form>
               <div className="connection-actions">
-                <button className="secondary-button" onClick={syncNotion} disabled={securityBusy || !settings?.notion_connected}>Sync now</button>
-                <a className="secondary-button" href={notionHub} target="_blank" rel="noreferrer">Open Notion ↗</a>
+                <button className="secondary-button" onClick={backupToNotion} disabled={securityBusy || !settings?.notion_connected}>Back up now</button>
+                <a className="secondary-button" href={notionHub} target="_blank" rel="noreferrer">View backup ↗</a>
               </div>
-              <p className="connection-detail">{settings?.last_notion_sync ? `Last sync: ${new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Singapore" }).format(new Date(settings.last_notion_sync))}` : settings?.last_sync_message || "Share the Applications database with your Notion integration before the first sync."}</p>
+              <p className="connection-detail">{settings?.last_backup_at ? `Last backup: ${new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Singapore" }).format(new Date(settings.last_backup_at))}` : settings?.backup_message || "Notion is optional. If you enable it, share the Applications database with your integration once."}</p>
             </section>
 
             {connectionMessage ? <p className="security-message" role="status">{connectionMessage}</p> : null}
