@@ -199,7 +199,6 @@ function notionProperties(job: Record<string, unknown>) {
     "Company career page": "Company site",
     "Manual entry": "Other",
     Notion: "Other",
-    "Prepared snapshot": "Other",
   };
   const cvStatusMap: Record<string, string> = { Drafting: "Drafted" };
   const coverStatusMap: Record<string, string> = { Drafting: "Drafted" };
@@ -391,19 +390,18 @@ Deno.serve(async (request) => {
       cursor = payload.has_more === true && typeof payload.next_cursor === "string" ? payload.next_cursor : null;
     } while (cursor);
 
-    const rows = pages.map(mapPage);
+    const rows = pages.map(mapPage).filter((row) => row.source !== "Prepared snapshot");
     if (rows.length > 0) {
       const { error: upsertError } = await adminClient
         .from("jobs")
         .upsert(rows, { onConflict: "notion_page_id" });
       if (upsertError) throw upsertError;
-
-      await adminClient
-        .from("jobs")
-        .delete()
-        .is("notion_page_id", null)
-        .eq("source", "Prepared snapshot");
     }
+
+    await adminClient
+      .from("jobs")
+      .delete()
+      .eq("source", "Prepared snapshot");
 
     const now = new Date().toISOString();
     await adminClient

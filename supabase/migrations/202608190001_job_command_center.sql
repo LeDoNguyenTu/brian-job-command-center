@@ -128,27 +128,6 @@ values
   ('S+D', 'Security + Development', 'Secure software, AppSec, cloud security', 'Best for hybrid engineering roles', 'cyan', 'https://app.notion.com/p/3c0bd4ad42a98168a2edfc5040d36adb', 2),
   ('SEC', 'Security', 'SOC, vulnerabilities, forensics, governance', 'Best for dedicated security roles', 'green', 'https://app.notion.com/p/3c0bd4ad42a981648125d187a397a7da', 3);
 
-insert into public.jobs (
-  company,
-  position,
-  role_track,
-  match_score,
-  match_level,
-  sponsorship,
-  location,
-  work_mode,
-  date_found,
-  matched_skills,
-  gaps_risks,
-  pipeline,
-  source
-)
-values
-  ('Xiaomi', 'Software Engineer, Fresh Graduate', 'Software', 88, 'Strong', 'Unknown', 'Singapore', 'On-site', '2026-08-19', array['Python', 'APIs', 'Backend'], 'Confirm sponsorship and graduate eligibility before preparing the final application.', 'Review', 'Prepared snapshot'),
-  ('Talentsis', 'Graduate Cloud Infrastructure Engineer', 'Cloud', 78, 'Review', 'Unknown', 'Singapore', 'Hybrid', '2026-08-19', array['Cloud', 'Infrastructure', 'Security'], 'Verify the employer, salary range, and sponsorship pathway.', 'Review', 'Prepared snapshot'),
-  ('Xiaomi', 'Computer Software Engineer, A132810', 'Software', 38, 'Blocked', 'Unknown', 'Singapore', 'On-site', '2026-08-18', array['Software', 'Mandarin required'], 'Blocked because the listing requires Mandarin.', 'Blocked', 'Prepared snapshot'),
-  ('Xiaomi', 'Cloud Engineer, Fresh Graduate', 'Cloud', 36, 'Blocked', 'Unknown', 'Singapore', 'On-site', '2026-08-18', array['Cloud', 'Mandarin required'], 'Blocked because Mandarin is mandatory.', 'Blocked', 'Prepared snapshot');
-
 insert into public.app_settings (
   notion_data_source_id,
   notion_hub_url
@@ -316,4 +295,3 @@ revoke all on public.app_admins, public.private_profile, public.resumes, public.
 grant select on public.app_admins to authenticated;
 grant select, insert, update, delete on public.private_profile, public.resumes, public.jobs, public.app_settings to authenticated;
 grant usage, select on sequence public.jobs_id_seq to authenticated;
-
