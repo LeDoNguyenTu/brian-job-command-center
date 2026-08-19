@@ -32,6 +32,16 @@ test("limits the job list and provides date sorting", () => {
   assert.match(pageSource, /Load more jobs/);
 });
 
+test("persists the dashboard scout toggle and visibly pauses its radar", () => {
+  assert.match(pageSource, /const toggleDiscoveryAutomation = async/);
+  assert.match(pageSource, /discovery_enabled: nextEnabled/);
+  assert.match(pageSource, /aria-pressed=\{discoveryEnabled\}/);
+  assert.match(pageSource, /Pause automatic job discovery/);
+  assert.match(pageSource, /Resume automatic job discovery/);
+  assert.match(globalStyles, /\.scan-visual\.paused \.scan-line\{animation-play-state:paused/);
+  assert.match(globalStyles, /\.scout-card\.paused\{/);
+});
+
 test("keeps a deploy-safe Supabase public configuration fallback", () => {
   assert.match(supabaseSource, /defaultSupabaseUrl/);
   assert.match(supabaseSource, /defaultSupabasePublishableKey/);

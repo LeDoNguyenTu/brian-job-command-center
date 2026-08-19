@@ -593,6 +593,7 @@ export default function Home() {
   const [discoveryTimezone, setDiscoveryTimezone] = useState("Asia/Singapore");
   const [discoverySources, setDiscoverySources] = useState("");
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
+  const [scoutToggleBusy, setScoutToggleBusy] = useState(false);
   const [discoveryMessage, setDiscoveryMessage] = useState("");
   const [documentProvider, setDocumentProvider] = useState<"gemini" | "openai_compatible">("gemini");
   const [documentModel, setDocumentModel] = useState("gemini-3.6-flash");
@@ -945,6 +946,45 @@ export default function Home() {
     .map((source) => source.trim())
     .filter(Boolean);
 
+  const discoveryStateCopy = (enabled: boolean, sourceTotal: number) => ({
+    status: enabled ? sourceTotal ? "Scheduled" : "Waiting for sources" : "Paused",
+    message: enabled
+      ? sourceTotal ? `Daily discovery is configured for ${formatScheduleTime(discoveryTime)}.` : "Add at least one supported company career page."
+      : "Automatic discovery is paused.",
+  });
+
+  const toggleDiscoveryAutomation = async () => {
+    if (scoutToggleBusy) return;
+    const previousEnabled = discoveryEnabled;
+    const nextEnabled = !previousEnabled;
+    const stateCopy = discoveryStateCopy(nextEnabled, normalizedDiscoverySources().length);
+
+    setScoutToggleBusy(true);
+    setDataError("");
+    setDiscoveryEnabled(nextEnabled);
+
+    const { data, error } = await supabase.from("app_settings").update({
+      discovery_enabled: nextEnabled,
+      discovery_status: stateCopy.status,
+      discovery_message: stateCopy.message,
+      updated_at: new Date().toISOString(),
+    }).eq("id", 1).select("discovery_enabled, discovery_status, discovery_message").single();
+
+    if (error) {
+      setDiscoveryEnabled(previousEnabled);
+      setDataError(`Could not ${nextEnabled ? "resume" : "pause"} Job Match Scout: ${error.message}`);
+    } else {
+      setSettings((current) => current ? {
+        ...current,
+        discovery_enabled: data.discovery_enabled,
+        discovery_status: data.discovery_status,
+        discovery_message: data.discovery_message,
+      } : current);
+      setDiscoveryMessage(nextEnabled ? "Automatic job discovery resumed." : "Automatic job discovery paused. Manual fetch remains available.");
+    }
+    setScoutToggleBusy(false);
+  };
+
   const persistDiscoverySettings = async () => {
     const sources = normalizedDiscoverySources();
     const unsupported = sources.find((source) => {
@@ -960,13 +1000,14 @@ export default function Home() {
       return false;
     }
 
+    const stateCopy = discoveryStateCopy(discoveryEnabled, sources.length);
     const { error } = await supabase.from("app_settings").update({
       discovery_enabled: discoveryEnabled,
       discovery_time: discoveryTime,
       discovery_timezone: discoveryTimezone,
       discovery_source_urls: sources,
-      discovery_status: sources.length ? "Scheduled" : "Waiting for sources",
-      discovery_message: sources.length ? `Daily discovery is configured for ${formatScheduleTime(discoveryTime)}.` : "Add at least one supported company career page.",
+      discovery_status: stateCopy.status,
+      discovery_message: stateCopy.message,
       updated_at: new Date().toISOString(),
     }).eq("id", 1);
     if (error) {
@@ -1393,9 +1434,9 @@ export default function Home() {
               </div>
             </article>
 
-            <aside className="scout-card">
-              <div className="scout-header"><div className="pulse-mark"><span /></div><div><p>Job Match Scout</p><strong>{discoveryReady ? "Active" : discoveryEnabled ? "Setup needed" : "Paused"}</strong></div><span className={discoveryReady ? "on-switch" : "on-switch paused"}><i /></span></div>
-              <div className="scan-visual"><span className="scan-line" /><div className="scan-core">⌕</div></div>
+            <aside className={discoveryReady ? "scout-card" : "scout-card paused"}>
+              <div className="scout-header"><div className={discoveryReady ? "pulse-mark" : "pulse-mark paused"}><span /></div><div><p>Job Match Scout</p><strong>{scoutToggleBusy ? "Updating..." : discoveryReady ? "Active" : discoveryEnabled ? "Setup needed" : "Paused"}</strong></div><button type="button" className={discoveryReady ? "on-switch" : "on-switch paused"} onClick={toggleDiscoveryAutomation} disabled={scoutToggleBusy} aria-pressed={discoveryEnabled} aria-label={discoveryEnabled ? "Pause automatic job discovery" : "Resume automatic job discovery"} title={discoveryEnabled ? "Pause automatic job discovery" : "Resume automatic job discovery"}><i /></button></div>
+              <div className={discoveryReady ? "scan-visual" : "scan-visual paused"} aria-label={discoveryReady ? "Job discovery radar active" : "Job discovery radar paused"}><span className="scan-line" /><div className="scan-core">⌕</div></div>
               <div className="scan-stats"><div><strong>{sourceCount}</strong><span>sources</span></div><div><strong>{jobs.length}</strong><span>roles tracked</span></div><div><strong>{strongCount}</strong><span>strong fit</span></div></div>
               <p className="next-scan">{discoveryEnabled ? `Daily at ${formatScheduleTime(settings?.discovery_time || discoveryTime)} ${scheduleZone}` : "Automatic discovery is paused"}</p>
               <div className="scout-actions"><button className="primary-button compact" onClick={fetchJobsNow} disabled={discoveryBusy || !sourceCount}>{discoveryBusy ? "Fetching..." : "Fetch now"}</button><button className="secondary-button" onClick={openSecurity}>Discovery settings</button></div>
