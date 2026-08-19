@@ -60,6 +60,7 @@ type AppSettings = {
   document_endpoint?: string | null;
   document_provider_configured?: boolean;
   document_provider_updated_at?: string | null;
+  session_timeout_minutes?: number;
 };
 
 type JobRow = {
@@ -302,13 +303,101 @@ function formatScheduleTime(value?: string) {
   return new Intl.DateTimeFormat("en-SG", { hour: "numeric", minute: "2-digit" }).format(date);
 }
 
+const SESSION_ACTIVITY_KEY = "brian-job-command-center:last-activity";
+const SESSION_TIMEOUT_OPTIONS = [
+  { value: 15, label: "15 minutes" },
+  { value: 30, label: "30 minutes" },
+  { value: 60, label: "1 hour" },
+  { value: 120, label: "2 hours" },
+  { value: 480, label: "8 hours" },
+];
+
+type TurnstileApi = {
+  render: (container: HTMLElement, options: {
+    sitekey: string;
+    theme: "dark";
+    size: "flexible";
+    callback: (token: string) => void;
+    "expired-callback": () => void;
+    "error-callback": () => void;
+  }) => string;
+  remove: (widgetId: string) => void;
+};
+
+function TurnstileWidget({ siteKey, onToken }: { siteKey: string; onToken: (token: string) => void }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let widgetId = "";
+    let cancelled = false;
+    const getApi = () => (window as typeof window & { turnstile?: TurnstileApi }).turnstile;
+    const renderWidget = () => {
+      const api = getApi();
+      if (cancelled || !api || !containerRef.current || widgetId) return;
+      widgetId = api.render(containerRef.current, {
+        sitekey: siteKey,
+        theme: "dark",
+        size: "flexible",
+        callback: onToken,
+        "expired-callback": () => onToken(""),
+        "error-callback": () => onToken(""),
+      });
+    };
+
+    const existingScript = document.getElementById("cloudflare-turnstile-script") as HTMLScriptElement | null;
+    if (getApi()) renderWidget();
+    else if (existingScript) existingScript.addEventListener("load", renderWidget, { once: true });
+    else {
+      const script = document.createElement("script");
+      script.id = "cloudflare-turnstile-script";
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.defer = true;
+      script.addEventListener("load", renderWidget, { once: true });
+      document.head.appendChild(script);
+    }
+
+    return () => {
+      cancelled = true;
+      existingScript?.removeEventListener("load", renderWidget);
+      const api = getApi();
+      if (api && widgetId) api.remove(widgetId);
+    };
+  }, [onToken, siteKey]);
+
+  return <div className="turnstile-widget" ref={containerRef} aria-label="Cloudflare security verification" />;
+}
+
 function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
+  const [turnstileError, setTurnstileError] = useState("");
   const passkeySupported = typeof window !== "undefined" && "PublicKeyCredential" in window;
+
+  const receiveCaptchaToken = useCallback((token: string) => setCaptchaToken(token), []);
+  const resetCaptcha = () => {
+    setCaptchaToken("");
+    setCaptchaResetKey((value) => value + 1);
+  };
+
+  useEffect(() => {
+    let active = true;
+    void supabase.functions.invoke("auth-public-config", { body: {} }).then(({ data, error: configError }) => {
+      if (!active) return;
+      if (configError || typeof data?.turnstileSiteKey !== "string") {
+        setTurnstileError("Cloudflare verification could not be loaded. Refresh the page and try again.");
+        return;
+      }
+      setTurnstileSiteKey(data.turnstileSiteKey);
+    });
+    return () => { active = false; };
+  }, []);
 
   const submitPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -318,14 +407,24 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
       setError("Enter your administrator email address.");
       return;
     }
+    if (!captchaToken) {
+      setError("Complete the Cloudflare verification before signing in.");
+      return;
+    }
 
     setBusy(true);
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: email.trim().toLowerCase(),
       password,
+      options: { captchaToken },
     });
-    if (signInError) setError(signInError.message);
-    else onAuthenticated();
+    if (signInError) {
+      setError(signInError.message);
+      resetCaptcha();
+    } else {
+      window.localStorage.setItem(SESSION_ACTIVITY_KEY, String(Date.now()));
+      onAuthenticated();
+    }
     setBusy(false);
   };
 
@@ -336,12 +435,18 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
       setError("Enter your email address first.");
       return;
     }
+    if (!captchaToken) {
+      setError("Complete the Cloudflare verification before requesting a reset.");
+      return;
+    }
     setBusy(true);
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
       redirectTo: window.location.origin,
+      captchaToken,
     });
     if (resetError) setError(resetError.message);
     else setMessage("Password reset instructions were sent if this email belongs to the administrator account.");
+    resetCaptcha();
     setBusy(false);
   };
 
@@ -349,9 +454,19 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
     setBusy(true);
     setError("");
     setMessage("");
-    const { error: passkeyError } = await supabase.auth.signInWithPasskey();
-    if (passkeyError) setError(passkeyError.message);
-    else onAuthenticated();
+    if (!captchaToken) {
+      setError("Complete the Cloudflare verification before using a passkey.");
+      setBusy(false);
+      return;
+    }
+    const { error: passkeyError } = await supabase.auth.signInWithPasskey({ options: { captchaToken } });
+    if (passkeyError) {
+      setError(passkeyError.message);
+      resetCaptcha();
+    } else {
+      window.localStorage.setItem(SESSION_ACTIVITY_KEY, String(Date.now()));
+      onAuthenticated();
+    }
     setBusy(false);
   };
 
@@ -368,16 +483,21 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
         <form className="auth-form" onSubmit={submitPassword}>
           <label><span>Email address</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="you@example.com" required /></label>
           <label><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" placeholder="Enter your private password" required /></label>
+          <div className="turnstile-panel">
+            <div className="turnstile-heading"><span>Cloudflare security check</span><strong>{captchaToken ? "Verified" : "Required"}</strong></div>
+            {turnstileSiteKey ? <TurnstileWidget key={captchaResetKey} siteKey={turnstileSiteKey} onToken={receiveCaptchaToken} /> : <div className="turnstile-loading">Loading secure verification...</div>}
+            {turnstileError ? <p className="turnstile-error" role="alert">{turnstileError}</p> : null}
+          </div>
           {error ? <p className="auth-message error" role="alert">{error}</p> : null}
           {message ? <p className="auth-message success" role="status">{message}</p> : null}
-          <button className="primary-button auth-primary" disabled={busy}>{busy ? "Please wait" : "Sign in securely"}</button>
+          <button className="primary-button auth-primary" disabled={busy || !captchaToken}>{busy ? "Please wait" : "Sign in securely"}</button>
         </form>
 
         <div className="auth-divider"><span>or</span></div>
-        <button className="passkey-button" onClick={signInWithPasskey} disabled={busy || !passkeySupported}><span>◎</span> Sign in with a passkey</button>
+        <button className="passkey-button" onClick={signInWithPasskey} disabled={busy || !passkeySupported || !captchaToken}><span>◎</span> Sign in with a passkey</button>
         {!passkeySupported ? <p className="auth-hint">This browser does not support passkeys.</p> : <p className="auth-hint">Passkey sign-in works after you register one from Security and connections.</p>}
 
-        <button className="auth-mode" onClick={resetPassword} disabled={busy}>Forgot password?</button>
+        <button className="auth-mode" onClick={resetPassword} disabled={busy || !captchaToken}>Forgot password?</button>
         <div className="auth-trust"><span>Encrypted database</span><span>Row-level security</span><span>Independent login</span></div>
       </section>
     </main>
@@ -463,6 +583,8 @@ export default function Home() {
   const [notionToken, setNotionToken] = useState("");
   const [connectionMessage, setConnectionMessage] = useState("");
   const [securityBusy, setSecurityBusy] = useState(false);
+  const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(60);
+  const [sessionMessage, setSessionMessage] = useState("");
   const [discoveryEnabled, setDiscoveryEnabled] = useState(true);
   const [discoveryTime, setDiscoveryTime] = useState("08:00");
   const [discoveryTimezone, setDiscoveryTimezone] = useState("Asia/Singapore");
@@ -538,6 +660,7 @@ export default function Home() {
       setDocumentProvider(nextSettings.document_provider || "gemini");
       setDocumentModel(nextSettings.document_model || "gemini-3.6-flash");
       setDocumentEndpoint(nextSettings.document_endpoint || "");
+      setSessionTimeoutMinutes(nextSettings.session_timeout_minutes || 60);
     }
     setAuthPhase("authorized");
     setDataLoading(false);
@@ -562,6 +685,52 @@ export default function Home() {
       window.removeEventListener("keydown", onKey);
     };
   }, [loadDashboard]);
+
+  useEffect(() => {
+    if (authPhase !== "authorized") return;
+
+    let timeoutId = 0;
+    let lastWrite = 0;
+    const timeoutMs = sessionTimeoutMinutes * 60_000;
+    const expireSession = async () => {
+      window.localStorage.removeItem(SESSION_ACTIVITY_KEY);
+      await supabase.auth.signOut({ scope: "local" });
+      setSecurityOpen(false);
+      setAuthPhase("signed_out");
+    };
+    const scheduleExpiry = () => {
+      window.clearTimeout(timeoutId);
+      const stored = Number(window.localStorage.getItem(SESSION_ACTIVITY_KEY));
+      const lastActivity = Number.isFinite(stored) && stored > 0 ? stored : Date.now();
+      if (!stored) window.localStorage.setItem(SESSION_ACTIVITY_KEY, String(lastActivity));
+      const remaining = timeoutMs - (Date.now() - lastActivity);
+      if (remaining <= 0) void expireSession();
+      else timeoutId = window.setTimeout(() => void expireSession(), remaining);
+    };
+    const markActivity = () => {
+      const now = Date.now();
+      if (now - lastWrite < 1_000) return;
+      lastWrite = now;
+      window.localStorage.setItem(SESSION_ACTIVITY_KEY, String(now));
+      scheduleExpiry();
+    };
+    const checkVisibility = () => {
+      if (document.visibilityState === "visible") scheduleExpiry();
+    };
+
+    scheduleExpiry();
+    window.addEventListener("pointerdown", markActivity, { passive: true });
+    window.addEventListener("keydown", markActivity);
+    window.addEventListener("touchstart", markActivity, { passive: true });
+    document.addEventListener("visibilitychange", checkVisibility);
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener("pointerdown", markActivity);
+      window.removeEventListener("keydown", markActivity);
+      window.removeEventListener("touchstart", markActivity);
+      document.removeEventListener("visibilitychange", checkVisibility);
+    };
+  }, [authPhase, sessionTimeoutMinutes]);
 
   useEffect(() => {
     if (!selectedJob) return;
@@ -675,6 +844,23 @@ export default function Home() {
       setNewPassword("");
       setConfirmPassword("");
       setConnectionMessage("Password updated successfully.");
+    }
+    setSecurityBusy(false);
+  };
+
+  const saveSessionTimeout = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSecurityBusy(true);
+    setSessionMessage("");
+    const { error } = await supabase.from("app_settings").update({
+      session_timeout_minutes: sessionTimeoutMinutes,
+      updated_at: new Date().toISOString(),
+    }).eq("id", 1);
+    if (error) setSessionMessage(error.message);
+    else {
+      window.localStorage.setItem(SESSION_ACTIVITY_KEY, String(Date.now()));
+      setSessionMessage(`Session timeout saved as ${SESSION_TIMEOUT_OPTIONS.find((option) => option.value === sessionTimeoutMinutes)?.label || `${sessionTimeoutMinutes} minutes`}.`);
+      setSettings((current) => current ? { ...current, session_timeout_minutes: sessionTimeoutMinutes } : current);
     }
     setSecurityBusy(false);
   };
@@ -1083,6 +1269,7 @@ export default function Home() {
   };
 
   const signOut = async () => {
+    window.localStorage.removeItem(SESSION_ACTIVITY_KEY);
     await supabase.auth.signOut();
     setSecurityOpen(false);
     setAuthPhase("signed_out");
@@ -1530,6 +1717,16 @@ export default function Home() {
                   <div key={passkey.id}><span>◉</span><p><strong>{passkey.friendly_name || "Passkey"}</strong><small>Added {new Intl.DateTimeFormat("en-SG", { day: "numeric", month: "short", year: "numeric" }).format(new Date(passkey.created_at))}</small></p><button onClick={() => deletePasskey(passkey.id)} disabled={securityBusy}>Remove</button></div>
                 )) : <div className="credential-empty"><span>○</span><p><strong>No passkey registered yet</strong><small>Add one after your email is confirmed.</small></p></div>}
               </div>
+            </section>
+
+            <section className="security-panel">
+              <div className="security-heading"><div><p>Session protection</p><h3>Automatic inactivity timeout</h3></div><span className="connection-status connected">Active</span></div>
+              <p className="security-copy">The current browser signs out after the selected period without clicks, taps, or keyboard activity. Other active devices keep their own session timer.</p>
+              <form className="session-timeout-form" onSubmit={saveSessionTimeout}>
+                <label><span>Sign out after</span><select value={sessionTimeoutMinutes} onChange={(event) => setSessionTimeoutMinutes(Number(event.target.value))}>{SESSION_TIMEOUT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label} of inactivity</option>)}</select></label>
+                <button className="secondary-button" disabled={securityBusy}>Save timeout</button>
+              </form>
+              {sessionMessage ? <p className="discovery-message" role="status">{sessionMessage}</p> : null}
             </section>
 
             <section className="security-panel">

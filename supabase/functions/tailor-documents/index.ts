@@ -5,14 +5,19 @@ import { strFromU8, unzipSync } from "npm:fflate@0.8.2";
 
 const allowedOrigins = new Set([
   "https://brian-job-command-center.meo-ah.chatgpt.site",
+  "https://brian-job.vercel.app",
   "http://terminal.local:4173",
   "http://localhost:4173",
 ]);
 
+const isAllowedOrigin = (origin: string) =>
+  allowedOrigins.has(origin) ||
+  /^https:\/\/brian-job-command-center(?:-[a-z0-9]+)*\.vercel\.app$/i.test(origin);
+
 const jsonHeaders = (request: Request) => {
   const origin = request.headers.get("origin") || "";
   return {
-    "Access-Control-Allow-Origin": allowedOrigins.has(origin)
+    "Access-Control-Allow-Origin": isAllowedOrigin(origin)
       ? origin
       : "https://brian-job-command-center.meo-ah.chatgpt.site",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
