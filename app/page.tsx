@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 const FALLBACK_NOTION_HUB =
@@ -324,6 +324,13 @@ function formatScheduleTime(value?: string) {
 }
 
 const SESSION_ACTIVITY_KEY = "brian-job-command-center:last-activity";
+const TEXT_SIZE_KEY = "brian-job-command-center:text-size";
+type TextSize = "standard" | "comfortable" | "large";
+const TEXT_SIZE_OPTIONS: Array<{ value: TextSize; label: string }> = [
+  { value: "standard", label: "Standard" },
+  { value: "comfortable", label: "Comfortable" },
+  { value: "large", label: "Large" },
+];
 const SESSION_TIMEOUT_OPTIONS = [
   { value: 15, label: "15 minutes" },
   { value: 30, label: "30 minutes" },
@@ -336,7 +343,7 @@ type TurnstileApi = {
   render: (container: HTMLElement, options: {
     sitekey: string;
     theme: "dark";
-    size: "flexible";
+    size: "flexible" | "compact";
     callback: (token: string) => void;
     "expired-callback": () => void;
     "error-callback": () => void;
@@ -349,20 +356,32 @@ function TurnstileWidget({ siteKey, onToken }: { siteKey: string; onToken: (toke
 
   useEffect(() => {
     let widgetId = "";
+    let renderedSize: "flexible" | "compact" | "" = "";
     let cancelled = false;
+    let resizeObserver: ResizeObserver | null = null;
     const getApi = () => (window as typeof window & { turnstile?: TurnstileApi }).turnstile;
     const renderWidget = () => {
       const api = getApi();
-      if (cancelled || !api || !containerRef.current || widgetId) return;
-      widgetId = api.render(containerRef.current, {
+      const container = containerRef.current;
+      if (cancelled || !api || !container) return;
+      const nextSize = container.clientWidth < 300 ? "compact" : "flexible";
+      if (widgetId && renderedSize === nextSize) return;
+      if (widgetId) api.remove(widgetId);
+      renderedSize = nextSize;
+      widgetId = api.render(container, {
         sitekey: siteKey,
         theme: "dark",
-        size: "flexible",
+        size: nextSize,
         callback: onToken,
         "expired-callback": () => onToken(""),
         "error-callback": () => onToken(""),
       });
     };
+
+    if (containerRef.current && "ResizeObserver" in window) {
+      resizeObserver = new ResizeObserver(renderWidget);
+      resizeObserver.observe(containerRef.current);
+    }
 
     const existingScript = document.getElementById("cloudflare-turnstile-script") as HTMLScriptElement | null;
     if (getApi()) renderWidget();
@@ -379,6 +398,7 @@ function TurnstileWidget({ siteKey, onToken }: { siteKey: string; onToken: (toke
 
     return () => {
       cancelled = true;
+      resizeObserver?.disconnect();
       existingScript?.removeEventListener("load", renderWidget);
       const api = getApi();
       if (api && widgetId) api.remove(widgetId);
@@ -570,7 +590,11 @@ function JobCard({
           <button className="text-button" onClick={onOpen}>Review details <span aria-hidden="true">↗</span></button>
         </div>
       </div>
-      <div className={`score-ring score-${job.match.toLowerCase()}`}>
+      <div
+        className={`score-ring score-${job.match.toLowerCase()}`}
+        style={{ "--match-score": Math.max(0, Math.min(100, job.score)) } as CSSProperties}
+        aria-label={`${job.score} percent match`}
+      >
         <strong>{job.score}</strong><span>match</span>
       </div>
     </article>
@@ -591,6 +615,7 @@ export default function Home() {
   const [feedDate, setFeedDate] = useState("all");
   const [visibleJobCount, setVisibleJobCount] = useState(JOBS_PER_PAGE);
   const [dark, setDark] = useState(true);
+  const [textSize, setTextSize] = useState<TextSize>("comfortable");
   const [saved, setSaved] = useState<number[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [revealProfile, setRevealProfile] = useState(false);
@@ -715,6 +740,21 @@ export default function Home() {
     const clock = window.setInterval(() => setCurrentDate(new Date()), 1_000);
     return () => window.clearInterval(clock);
   }, []);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const savedTextSize = window.localStorage.getItem(TEXT_SIZE_KEY);
+      if (TEXT_SIZE_OPTIONS.some((option) => option.value === savedTextSize)) {
+        setTextSize(savedTextSize as TextSize);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  const changeTextSize = (nextTextSize: TextSize) => {
+    setTextSize(nextTextSize);
+    window.localStorage.setItem(TEXT_SIZE_KEY, nextTextSize);
+  };
 
   useEffect(() => {
     if (authPhase !== "authorized") return;
@@ -1400,7 +1440,7 @@ export default function Home() {
   const selectedResume = resumes.find((resume) => resume.code === documentResumeCode);
 
   return (
-    <main className={dark ? "app-shell dark" : "app-shell light"}>
+    <main className={`${dark ? "app-shell dark" : "app-shell light"} text-size-${textSize}`}>
       <div className="aurora aurora-one" /><div className="aurora aurora-two" />
 
       <aside className="sidebar">
@@ -1831,6 +1871,14 @@ export default function Home() {
                 {passkeys.length ? passkeys.map((passkey) => (
                   <div key={passkey.id}><span>◉</span><p><strong>{passkey.friendly_name || "Passkey"}</strong><small>Added {new Intl.DateTimeFormat("en-SG", { day: "numeric", month: "short", year: "numeric" }).format(new Date(passkey.created_at))}</small></p><button onClick={() => deletePasskey(passkey.id)} disabled={securityBusy}>Remove</button></div>
                 )) : <div className="credential-empty"><span>○</span><p><strong>No passkey registered yet</strong><small>Add one after your email is confirmed.</small></p></div>}
+              </div>
+            </section>
+
+            <section className="security-panel">
+              <div className="security-heading"><div><p>Display preferences</p><h3>Dashboard text size</h3></div><span className="connection-status connected">{TEXT_SIZE_OPTIONS.find((option) => option.value === textSize)?.label}</span></div>
+              <p className="security-copy">Increase dashboard text without changing the number of jobs shown or the responsive mobile layout. This preference is saved only in this browser.</p>
+              <div className="text-size-control" role="group" aria-label="Dashboard text size">
+                {TEXT_SIZE_OPTIONS.map((option) => <button type="button" key={option.value} className={textSize === option.value ? "active" : ""} aria-pressed={textSize === option.value} onClick={() => changeTextSize(option.value)}>{option.label}</button>)}
               </div>
             </section>
 
