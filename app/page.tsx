@@ -10,13 +10,16 @@ const MOM_S_PASS =
   "https://www.mom.gov.sg/passes-and-permits/s-pass/eligibility";
 const JOBS_PER_PAGE = 10;
 const DEFAULT_DISCOVERY_QUERIES = [
-  "graduate junior entry level software developer engineer Singapore",
-  "graduate junior entry level cybersecurity SOC analyst Singapore",
-  "graduate junior entry level IT support helpdesk Singapore",
-  "graduate junior entry level cloud network infrastructure Singapore",
+  "graduate junior entry level software developer engineer",
+  "graduate junior entry level cybersecurity SOC analyst",
+  "graduate junior entry level IT support helpdesk",
+  "graduate junior entry level cloud network infrastructure",
 ];
-const LINKEDIN_JOB_SEARCH = "https://www.linkedin.com/jobs/search/?keywords=graduate%20junior%20software%20cybersecurity%20IT%20support&location=Singapore";
-const INDEED_JOB_SEARCH = "https://sg.indeed.com/jobs?q=graduate+junior+software+cybersecurity+IT+support&l=Singapore&fromage=7";
+const DISCOVERY_COUNTRIES = [
+  ["singapore", "Singapore"], ["malaysia", "Malaysia"], ["vietnam", "Vietnam"],
+  ["thailand", "Thailand"], ["indonesia", "Indonesia"], ["philippines", "Philippines"],
+  ["australia", "Australia"],
+] as const;
 
 type Resume = {
   code: string;
@@ -65,6 +68,12 @@ type AppSettings = {
   discovery_web_search_configured?: boolean;
   discovery_search_queries?: string[];
   discovery_max_required_years?: number;
+  discovery_location?: string;
+  discovery_country?: string;
+  discovery_web_search_provider?: "tavily";
+  discovery_monthly_credit_cap?: number;
+  discovery_last_credit_usage?: number | null;
+  discovery_last_credit_limit?: number | null;
   last_discovery_at?: string | null;
   last_scheduled_discovery_date?: string | null;
   discovery_status?: string;
@@ -665,6 +674,8 @@ export default function Home() {
   const [webSearchQueries, setWebSearchQueries] = useState(DEFAULT_DISCOVERY_QUERIES.join("\n"));
   const [webSearchKey, setWebSearchKey] = useState("");
   const [maxRequiredYears, setMaxRequiredYears] = useState(1);
+  const [discoveryLocation, setDiscoveryLocation] = useState("Singapore");
+  const [discoveryCountry, setDiscoveryCountry] = useState("singapore");
   const [decisionBusyId, setDecisionBusyId] = useState<number | null>(null);
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [scoutToggleBusy, setScoutToggleBusy] = useState(false);
@@ -740,6 +751,8 @@ export default function Home() {
       setWebSearchConfigured(nextSettings.discovery_web_search_configured ?? false);
       setWebSearchQueries((nextSettings.discovery_search_queries?.length ? nextSettings.discovery_search_queries : DEFAULT_DISCOVERY_QUERIES).join("\n"));
       setMaxRequiredYears(nextSettings.discovery_max_required_years ?? 1);
+      setDiscoveryLocation(nextSettings.discovery_location || "Singapore");
+      setDiscoveryCountry(nextSettings.discovery_country || "singapore");
       setDocumentProvider(nextSettings.document_provider || "gemini");
       setDocumentModel(nextSettings.document_model || "gemini-3.6-flash");
       setDocumentEndpoint(nextSettings.document_endpoint || "");
@@ -1095,7 +1108,7 @@ export default function Home() {
   const discoveryStateCopy = (enabled: boolean, sourceTotal: number, webReady = webSearchEnabled && webSearchConfigured) => ({
     status: enabled ? sourceTotal || webReady ? "Scheduled" : "Waiting for sources" : "Paused",
     message: enabled
-      ? sourceTotal || webReady ? `Daily discovery is configured for ${formatScheduleTime(discoveryTime)}.` : "Add a supported company board or configure web-wide search."
+      ? sourceTotal || webReady ? `Daily discovery for ${discoveryLocation.trim() || "the selected location"} is configured for ${formatScheduleTime(discoveryTime)}.` : "Add a direct company feed or configure Tavily web discovery."
       : "Automatic discovery is paused.",
   });
 
@@ -1142,7 +1155,7 @@ export default function Home() {
       }
     });
     if (unsupported) {
-      setDiscoveryMessage(`Unsupported career page: ${unsupported}. Use a public Greenhouse or Lever board URL.`);
+      setDiscoveryMessage(`Unsupported direct board: ${unsupported}. Direct feeds accept Greenhouse and Lever. Tavily automatically discovers Workday, Ashby, SmartRecruiters, iCIMS, Workable, and independent career sites.`);
       return false;
     }
 
@@ -1150,6 +1163,10 @@ export default function Home() {
     const queries = normalizedWebSearchQueries();
     if (webSearchEnabled && !queries.length) {
       setDiscoveryMessage("Add at least one web search query or turn web search off.");
+      return false;
+    }
+    if (discoveryLocation.trim().length < 2) {
+      setDiscoveryMessage("Enter the city, region, or country where you want to find jobs.");
       return false;
     }
     const { error } = await supabase.from("app_settings").update({
@@ -1160,6 +1177,10 @@ export default function Home() {
       discovery_web_search_enabled: webSearchEnabled,
       discovery_search_queries: queries,
       discovery_max_required_years: maxRequiredYears,
+      discovery_location: discoveryLocation.trim(),
+      discovery_country: discoveryCountry,
+      discovery_web_search_provider: "tavily",
+      discovery_monthly_credit_cap: 900,
       discovery_status: stateCopy.status,
       discovery_message: stateCopy.message,
       updated_at: new Date().toISOString(),
@@ -1172,8 +1193,8 @@ export default function Home() {
   };
 
   const saveWebSearchKey = async () => {
-    if (webSearchKey.trim().length < 20) {
-      setDiscoveryMessage("Enter a valid Brave Search API key.");
+    if (!/^tvly-[A-Za-z0-9_-]{16,}$/.test(webSearchKey.trim())) {
+      setDiscoveryMessage("Enter a valid Tavily API key beginning with tvly-.");
       return;
     }
     setDiscoveryBusy(true);
@@ -1185,7 +1206,7 @@ export default function Home() {
       setWebSearchKey("");
       setWebSearchConfigured(true);
       setWebSearchEnabled(true);
-      setDiscoveryMessage("Web-wide search key saved securely in Supabase Vault.");
+      setDiscoveryMessage("Tavily search and page-extraction key saved securely in Supabase Vault.");
       await loadDashboard();
     }
     setDiscoveryBusy(false);
@@ -1204,7 +1225,7 @@ export default function Home() {
 
   const fetchJobsNow = async () => {
     setDiscoveryBusy(true);
-    setDiscoveryMessage("Checking company boards and web search now...");
+    setDiscoveryMessage(`Searching direct boards and the wider web for ${discoveryLocation.trim()} roles now...`);
     if (!(await persistDiscoverySettings())) {
       setDiscoveryBusy(false);
       return;
@@ -1215,7 +1236,8 @@ export default function Home() {
     } else if (data?.skipped) {
       setDiscoveryMessage(data.reason || "The scan was skipped.");
     } else {
-      setDiscoveryMessage(`${data?.inserted ?? 0} new roles added. ${data?.duplicates ?? 0} already tracked. ${data?.skipped ?? 0} unsuitable roles skipped.`);
+      const usage = data?.tavilyUsage ? ` Tavily used ${data.tavilyUsage.usage} of ${Math.min(data.tavilyUsage.limit, 900)} allowed monthly credits.` : "";
+      setDiscoveryMessage(`${data?.inserted ?? 0} new roles added for ${data?.targetLocation || discoveryLocation}. ${data?.duplicates ?? 0} already tracked. ${data?.skipped ?? 0} unsuitable roles skipped.${usage}`);
       await loadDashboard();
     }
     setDiscoveryBusy(false);
@@ -1532,6 +1554,9 @@ export default function Home() {
   const sourceCount = companySourceCount + (webSearchEnabled && webSearchConfigured ? 1 : 0);
   const discoveryReady = discoveryEnabled && sourceCount > 0;
   const scheduleZone = (settings?.discovery_timezone || discoveryTimezone) === "Asia/Singapore" ? "SGT" : (settings?.discovery_timezone || discoveryTimezone);
+  const jobSearchKeywords = "graduate junior software cybersecurity cloud IT support";
+  const linkedInJobSearch = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(jobSearchKeywords)}&location=${encodeURIComponent(discoveryLocation)}`;
+  const indeedJobSearch = `https://www.indeed.com/jobs?q=${encodeURIComponent(jobSearchKeywords)}&l=${encodeURIComponent(discoveryLocation)}&fromage=7`;
   const selectedSuggestion = selectedJob ? suggestResume(selectedJob, resumes) : null;
   const selectedResume = resumes.find((resume) => resume.code === documentResumeCode);
 
@@ -1622,7 +1647,7 @@ export default function Home() {
             <aside className={discoveryReady ? "scout-card" : "scout-card paused"}>
               <div className="scout-header"><div className={discoveryReady ? "pulse-mark" : "pulse-mark paused"}><span /></div><div><p>Job Match Scout</p><strong>{scoutToggleBusy ? "Updating..." : discoveryReady ? "Active" : discoveryEnabled ? "Setup needed" : "Paused"}</strong></div><button type="button" className={discoveryReady ? "on-switch" : "on-switch paused"} onClick={toggleDiscoveryAutomation} disabled={scoutToggleBusy} aria-pressed={discoveryEnabled} aria-label={discoveryEnabled ? "Pause automatic job discovery" : "Resume automatic job discovery"} title={discoveryEnabled ? "Pause automatic job discovery" : "Resume automatic job discovery"}><i /></button></div>
               <div className={discoveryReady ? "scan-visual" : "scan-visual paused"} aria-label={discoveryReady ? "Job discovery radar active" : "Job discovery radar paused"}><span className="scan-line" /><div className="scan-core">⌕</div></div>
-              <div className="scan-stats"><div><strong>{sourceCount}</strong><span>sources</span></div><div><strong>{jobs.length}</strong><span>roles tracked</span></div><div><strong>{strongCount}</strong><span>strong fit</span></div></div>
+              <div className="scan-stats"><div><strong>{sourceCount}</strong><span>source types</span></div><div><strong>{jobs.length}</strong><span>roles tracked</span></div><div><strong>{strongCount}</strong><span>strong fit</span></div></div>
               <p className="next-scan">{discoveryEnabled ? `Daily at ${formatScheduleTime(settings?.discovery_time || discoveryTime)} ${scheduleZone}` : "Automatic discovery is paused"}</p>
               <div className="scout-actions"><button className="primary-button compact" onClick={fetchJobsNow} disabled={discoveryBusy || !sourceCount}>{discoveryBusy ? "Fetching..." : "Fetch now"}</button><button className="secondary-button" onClick={openSecurity}>Discovery settings</button></div>
             </aside>
@@ -1916,25 +1941,30 @@ export default function Home() {
             </div>
 
             <section className="security-panel discovery-panel">
-              <div className="security-heading"><div><p>Job discovery</p><h3>Schedule, web search, and company sources</h3></div><span className={discoveryEnabled && (normalizedDiscoverySources().length || webSearchConfigured) ? "connection-status connected" : "connection-status"}>{discoveryEnabled ? normalizedDiscoverySources().length || webSearchConfigured ? "Scheduled" : "Setup needed" : "Paused"}</span></div>
-              <p className="security-copy">The scout combines supported company boards with fresh web search results, then keeps only Singapore early-career technology roles. Repeated scans update known listings without creating duplicates.</p>
+              <div className="security-heading"><div><p>Job discovery</p><h3>Location, schedule, and web coverage</h3></div><span className={discoveryEnabled && (normalizedDiscoverySources().length || webSearchConfigured) ? "connection-status connected" : "connection-status"}>{discoveryEnabled ? normalizedDiscoverySources().length || webSearchConfigured ? "Scheduled" : "Setup needed" : "Paused"}</span></div>
+              <p className="security-copy">The scout combines direct company feeds with Tavily search and page extraction across Workday, Ashby, SmartRecruiters, Workable, iCIMS, Oracle Recruiting, job boards, and independent company career sites. Repeated runs update known listings without creating duplicates.</p>
               <form className="discovery-form" onSubmit={saveDiscoverySettings}>
                 <label className="checkbox-field discovery-toggle"><input type="checkbox" checked={discoveryEnabled} onChange={(event) => setDiscoveryEnabled(event.target.checked)} /><span>Run automatically each day</span></label>
+                <div className="discovery-schedule-grid">
+                  <label><span>Target country</span><select value={discoveryCountry} onChange={(event) => { const country = event.target.value; setDiscoveryCountry(country); const label = DISCOVERY_COUNTRIES.find(([value]) => value === country)?.[1]; if (label) setDiscoveryLocation(label); }}>{DISCOVERY_COUNTRIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <label><span>City, region, or country</span><input value={discoveryLocation} onChange={(event) => setDiscoveryLocation(event.target.value)} placeholder="Singapore, Kuala Lumpur, Ho Chi Minh City..." required /></label>
+                </div>
                 <div className="discovery-schedule-grid">
                   <label><span>Daily time</span><input type="time" value={discoveryTime} onChange={(event) => setDiscoveryTime(event.target.value)} required /></label>
                   <label><span>Timezone</span><select value={discoveryTimezone} onChange={(event) => setDiscoveryTimezone(event.target.value)}><option value="Asia/Singapore">Singapore - SGT</option><option value="Asia/Ho_Chi_Minh">Vietnam - ICT</option><option value="Asia/Kuala_Lumpur">Kuala Lumpur - MYT</option><option value="UTC">UTC</option></select></label>
                 </div>
-                <div className="web-search-heading"><label className="checkbox-field discovery-toggle"><input type="checkbox" checked={webSearchEnabled} onChange={(event) => setWebSearchEnabled(event.target.checked)} /><span>Include fresh web-wide search</span></label><span className={webSearchConfigured ? "connection-status connected" : "connection-status"}>{webSearchConfigured ? "Vault secured" : "API key needed"}</span></div>
+                <div className="web-search-heading"><label className="checkbox-field discovery-toggle"><input type="checkbox" checked={webSearchEnabled} onChange={(event) => setWebSearchEnabled(event.target.checked)} /><span>Search and extract the wider web</span></label><span className={webSearchConfigured ? "connection-status connected" : "connection-status"}>{webSearchConfigured ? "Tavily secured" : "API key needed"}</span></div>
                 <div className="discovery-schedule-grid">
                   <label><span>Maximum required experience</span><select value={maxRequiredYears} onChange={(event) => setMaxRequiredYears(Number(event.target.value))}><option value={0}>No professional experience</option><option value={1}>Up to 1 year</option><option value={2}>Up to 2 years</option></select></label>
-                  <label><span>{webSearchConfigured ? "Replacement Brave Search key" : "Brave Search API key"}</span><input type="password" value={webSearchKey} onChange={(event) => setWebSearchKey(event.target.value)} autoComplete="off" placeholder={webSearchConfigured ? "Paste only to replace current key" : "Paste API key"} /></label>
+                  <label><span>{webSearchConfigured ? "Replacement Tavily key" : "Tavily API key"}</span><input type="password" value={webSearchKey} onChange={(event) => setWebSearchKey(event.target.value)} autoComplete="off" placeholder={webSearchConfigured ? "Paste only to replace current key" : "tvly-..."} /></label>
                 </div>
-                <div className="web-key-actions"><p>The key is stored in encrypted Supabase Vault and is never shown again.</p><button className="secondary-button" type="button" onClick={saveWebSearchKey} disabled={discoveryBusy || !webSearchKey.trim()}>{webSearchConfigured ? "Replace web search key" : "Save web search key"}</button></div>
-                <label><span>Web search queries, one per line</span><textarea rows={5} value={webSearchQueries} onChange={(event) => setWebSearchQueries(event.target.value)} /></label>
-                <div className="personal-job-links"><div><strong>Personal job-board searches</strong><small>These open in your browser and use your existing login. The dashboard never stores your LinkedIn or Indeed password.</small></div><a className="secondary-button" href={LINKEDIN_JOB_SEARCH} target="_blank" rel="noreferrer">Open LinkedIn ↗</a><a className="secondary-button" href={INDEED_JOB_SEARCH} target="_blank" rel="noreferrer">Open Indeed ↗</a></div>
-                <label><span>Optional Greenhouse or Lever company board URLs</span><textarea rows={5} value={discoverySources} onChange={(event) => setDiscoverySources(event.target.value)} placeholder={"https://boards.greenhouse.io/company\nhttps://jobs.lever.co/company"} /></label>
+                <div className="web-key-actions"><p>The free Tavily plan provides 1,000 monthly credits without a card. The scout stops web requests at 900 and keeps a 100-credit buffer. Your key stays encrypted in Supabase Vault.</p><button className="secondary-button" type="button" onClick={saveWebSearchKey} disabled={discoveryBusy || !webSearchKey.trim()}>{webSearchConfigured ? "Replace Tavily key" : "Save Tavily key"}</button></div>
+                <label><span>Target role searches, one per line</span><textarea rows={5} value={webSearchQueries} onChange={(event) => setWebSearchQueries(event.target.value)} /><small>The saved location is added automatically. Two extra searches cover major ATS platforms and independent company career sites.</small></label>
+                <div className="personal-job-links"><div><strong>Personal job-board searches for {discoveryLocation}</strong><small>These open in your browser and use your existing login. The dashboard never stores your LinkedIn or Indeed password.</small></div><a className="secondary-button" href={linkedInJobSearch} target="_blank" rel="noreferrer">Open LinkedIn ↗</a><a className="secondary-button" href={indeedJobSearch} target="_blank" rel="noreferrer">Open Indeed ↗</a></div>
+                <label><span>Optional direct Greenhouse or Lever feeds</span><textarea rows={5} value={discoverySources} onChange={(event) => setDiscoverySources(event.target.value)} placeholder={"https://boards.greenhouse.io/company\nhttps://jobs.lever.co/company"} /><small>These reliable feeds supplement Tavily. Workday and other career systems are discovered automatically, so they do not need to be listed here.</small></label>
                 <div className="discovery-actions"><button className="secondary-button" type="submit" disabled={discoveryBusy}>{discoveryBusy ? "Saving..." : "Save discovery settings"}</button><button className="primary-button compact" type="button" onClick={fetchJobsNow} disabled={discoveryBusy || (!normalizedDiscoverySources().length && !webSearchConfigured)}>{discoveryBusy ? "Fetching..." : "Fetch now"}</button></div>
               </form>
+              {settings?.discovery_last_credit_limit ? <p className="connection-detail">Tavily usage: {settings.discovery_last_credit_usage ?? 0} of {Math.min(settings.discovery_last_credit_limit, settings.discovery_monthly_credit_cap ?? 900)} allowed credits this month. Web discovery pauses automatically before the safety ceiling.</p> : null}
               <p className="connection-detail">{settings?.last_discovery_at ? `Last run: ${new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short", timeZone: settings.discovery_timezone || "Asia/Singapore" }).format(new Date(settings.last_discovery_at))}. ${settings.discovery_message || ""}` : settings?.discovery_message || "No live discovery run yet. Existing prepared records will remain until you delete them."}</p>
               {discoveryMessage ? <p className="discovery-message" role="status">{discoveryMessage}</p> : null}
             </section>
