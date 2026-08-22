@@ -9,6 +9,14 @@ const FALLBACK_NOTION_HUB =
 const MOM_S_PASS =
   "https://www.mom.gov.sg/passes-and-permits/s-pass/eligibility";
 const JOBS_PER_PAGE = 10;
+const DEFAULT_DISCOVERY_QUERIES = [
+  "graduate junior entry level software developer engineer Singapore",
+  "graduate junior entry level cybersecurity SOC analyst Singapore",
+  "graduate junior entry level IT support helpdesk Singapore",
+  "graduate junior entry level cloud network infrastructure Singapore",
+];
+const LINKEDIN_JOB_SEARCH = "https://www.linkedin.com/jobs/search/?keywords=graduate%20junior%20software%20cybersecurity%20IT%20support&location=Singapore";
+const INDEED_JOB_SEARCH = "https://sg.indeed.com/jobs?q=graduate+junior+software+cybersecurity+IT+support&l=Singapore&fromage=7";
 
 type Resume = {
   code: string;
@@ -53,6 +61,10 @@ type AppSettings = {
   discovery_time?: string;
   discovery_timezone?: string;
   discovery_source_urls?: string[];
+  discovery_web_search_enabled?: boolean;
+  discovery_web_search_configured?: boolean;
+  discovery_search_queries?: string[];
+  discovery_max_required_years?: number;
   last_discovery_at?: string | null;
   last_scheduled_discovery_date?: string | null;
   discovery_status?: string;
@@ -551,11 +563,15 @@ function JobCard({
   saved,
   onSave,
   onOpen,
+  onDecision,
+  decisionBusy,
 }: {
   job: Job;
   saved: boolean;
   onSave: () => void;
   onOpen: () => void;
+  onDecision: (decision: "Accepted" | "Applied" | "Rejected") => void;
+  decisionBusy: boolean;
 }) {
   return (
     <article className="job-card">
@@ -582,9 +598,15 @@ function JobCard({
         <div className="tag-row">
           {job.tags.map((tag) => <span key={tag} className="tag">{tag}</span>)}
         </div>
+        <div className="decision-actions" aria-label={`Decision for ${job.role}`}>
+          <button type="button" className={job.pipeline === "Accepted" ? "accepted active" : "accepted"} onClick={() => onDecision("Accepted")} disabled={decisionBusy}>✓ Accept</button>
+          <button type="button" className={job.pipeline === "Applied" ? "applied active" : "applied"} onClick={() => onDecision("Applied")} disabled={decisionBusy}>↗ Applied</button>
+          <button type="button" className={job.pipeline === "Rejected" ? "rejected active" : "rejected"} onClick={() => onDecision("Rejected")} disabled={decisionBusy}>× Reject</button>
+        </div>
         <div className="job-footer">
           <div className="status-group">
             <span className={`match-pill ${job.match.toLowerCase()}`}>{job.match}</span>
+            <span className={`pipeline-pill ${job.pipeline.toLowerCase().replaceAll(" ", "-")}`}>{job.pipeline}</span>
             <span className="sponsor-pill unknown">Sponsorship {job.sponsorship.toLowerCase()}</span>
           </div>
           <button className="text-button" onClick={onOpen}>Review details <span aria-hidden="true">↗</span></button>
@@ -613,6 +635,7 @@ export default function Home() {
   const [filter, setFilter] = useState("All");
   const [jobSort, setJobSort] = useState<"newest" | "oldest">("newest");
   const [feedDate, setFeedDate] = useState("all");
+  const [pipelineFilter, setPipelineFilter] = useState("Active");
   const [visibleJobCount, setVisibleJobCount] = useState(JOBS_PER_PAGE);
   const [dark, setDark] = useState(true);
   const [textSize, setTextSize] = useState<TextSize>("comfortable");
@@ -637,6 +660,12 @@ export default function Home() {
   const [discoveryTime, setDiscoveryTime] = useState("08:00");
   const [discoveryTimezone, setDiscoveryTimezone] = useState("Asia/Singapore");
   const [discoverySources, setDiscoverySources] = useState("");
+  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
+  const [webSearchConfigured, setWebSearchConfigured] = useState(false);
+  const [webSearchQueries, setWebSearchQueries] = useState(DEFAULT_DISCOVERY_QUERIES.join("\n"));
+  const [webSearchKey, setWebSearchKey] = useState("");
+  const [maxRequiredYears, setMaxRequiredYears] = useState(1);
+  const [decisionBusyId, setDecisionBusyId] = useState<number | null>(null);
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [scoutToggleBusy, setScoutToggleBusy] = useState(false);
   const [discoveryMessage, setDiscoveryMessage] = useState("");
@@ -707,6 +736,10 @@ export default function Home() {
       setDiscoveryTime((nextSettings.discovery_time || "08:00").slice(0, 5));
       setDiscoveryTimezone(nextSettings.discovery_timezone || "Asia/Singapore");
       setDiscoverySources((nextSettings.discovery_source_urls ?? []).join("\n"));
+      setWebSearchEnabled(nextSettings.discovery_web_search_enabled ?? true);
+      setWebSearchConfigured(nextSettings.discovery_web_search_configured ?? false);
+      setWebSearchQueries((nextSettings.discovery_search_queries?.length ? nextSettings.discovery_search_queries : DEFAULT_DISCOVERY_QUERIES).join("\n"));
+      setMaxRequiredYears(nextSettings.discovery_max_required_years ?? 1);
       setDocumentProvider(nextSettings.document_provider || "gemini");
       setDocumentModel(nextSettings.document_model || "gemini-3.6-flash");
       setDocumentEndpoint(nextSettings.document_endpoint || "");
@@ -826,8 +859,11 @@ export default function Home() {
       .filter((job) => {
         const matchesFilter = filter === "All" || job.match === filter;
         const matchesDate = feedDate === "all" || job.dateFound === feedDate;
+        const matchesPipeline = pipelineFilter === "All statuses"
+          || pipelineFilter === "Active" && !["Rejected", "Blocked"].includes(job.pipeline)
+          || job.pipeline === pipelineFilter;
         const haystack = `${job.company} ${job.role} ${job.track} ${job.tags.join(" ")}`.toLowerCase();
-        return matchesFilter && matchesDate && (!normalized || haystack.includes(normalized));
+        return matchesFilter && matchesDate && matchesPipeline && (!normalized || haystack.includes(normalized));
       })
       .sort((first, second) => {
         const firstDate = first.dateFound ? new Date(`${first.dateFound}T00:00:00`).getTime() : null;
@@ -838,7 +874,7 @@ export default function Home() {
         const dateDifference = jobSort === "newest" ? secondDate - firstDate : firstDate - secondDate;
         return dateDifference || second.score - first.score || second.id - first.id;
       });
-  }, [feedDate, filter, query, jobs, jobSort]);
+  }, [feedDate, filter, pipelineFilter, query, jobs, jobSort]);
 
   const visibleJobs = filteredJobs.slice(0, visibleJobCount);
   const groupedVisibleJobs = useMemo(() => {
@@ -873,6 +909,31 @@ export default function Home() {
       setSaved((items) => wasSaved ? [...items, id] : items.filter((item) => item !== id));
       setDataError(error.message);
     }
+  };
+
+  const setJobDecision = async (job: Job, decision: "Accepted" | "Applied" | "Rejected") => {
+    if (decisionBusyId !== null) return;
+    const previousJobs = jobs;
+    const previousSelectedJob = selectedJob;
+    const approved = decision !== "Rejected";
+    const updatedJob = { ...job, pipeline: decision, approved };
+
+    setDecisionBusyId(job.id);
+    setDataError("");
+    setJobs((items) => items.map((item) => item.id === job.id ? updatedJob : item));
+    setSelectedJob((current) => current?.id === job.id ? updatedJob : current);
+
+    const { error } = await supabase.from("jobs").update({
+      pipeline: decision,
+      approved_to_apply: approved,
+      updated_at: new Date().toISOString(),
+    }).eq("id", job.id);
+    if (error) {
+      setJobs(previousJobs);
+      setSelectedJob(previousSelectedJob);
+      setDataError(`Could not label this job: ${error.message}`);
+    }
+    setDecisionBusyId(null);
   };
 
   const salary = salaryEra === "2026"
@@ -1025,10 +1086,16 @@ export default function Home() {
     .map((source) => source.trim())
     .filter(Boolean);
 
-  const discoveryStateCopy = (enabled: boolean, sourceTotal: number) => ({
-    status: enabled ? sourceTotal ? "Scheduled" : "Waiting for sources" : "Paused",
+  const normalizedWebSearchQueries = () => webSearchQueries
+    .split(/\r?\n/)
+    .map((searchQuery) => searchQuery.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+
+  const discoveryStateCopy = (enabled: boolean, sourceTotal: number, webReady = webSearchEnabled && webSearchConfigured) => ({
+    status: enabled ? sourceTotal || webReady ? "Scheduled" : "Waiting for sources" : "Paused",
     message: enabled
-      ? sourceTotal ? `Daily discovery is configured for ${formatScheduleTime(discoveryTime)}.` : "Add at least one supported company career page."
+      ? sourceTotal || webReady ? `Daily discovery is configured for ${formatScheduleTime(discoveryTime)}.` : "Add a supported company board or configure web-wide search."
       : "Automatic discovery is paused.",
   });
 
@@ -1080,11 +1147,19 @@ export default function Home() {
     }
 
     const stateCopy = discoveryStateCopy(discoveryEnabled, sources.length);
+    const queries = normalizedWebSearchQueries();
+    if (webSearchEnabled && !queries.length) {
+      setDiscoveryMessage("Add at least one web search query or turn web search off.");
+      return false;
+    }
     const { error } = await supabase.from("app_settings").update({
       discovery_enabled: discoveryEnabled,
       discovery_time: discoveryTime,
       discovery_timezone: discoveryTimezone,
       discovery_source_urls: sources,
+      discovery_web_search_enabled: webSearchEnabled,
+      discovery_search_queries: queries,
+      discovery_max_required_years: maxRequiredYears,
       discovery_status: stateCopy.status,
       discovery_message: stateCopy.message,
       updated_at: new Date().toISOString(),
@@ -1096,12 +1171,32 @@ export default function Home() {
     return true;
   };
 
+  const saveWebSearchKey = async () => {
+    if (webSearchKey.trim().length < 20) {
+      setDiscoveryMessage("Enter a valid Brave Search API key.");
+      return;
+    }
+    setDiscoveryBusy(true);
+    setDiscoveryMessage("");
+    const { error } = await supabase.rpc("store_web_search_key", { key_value: webSearchKey.trim() });
+    if (error) {
+      setDiscoveryMessage(error.message);
+    } else {
+      setWebSearchKey("");
+      setWebSearchConfigured(true);
+      setWebSearchEnabled(true);
+      setDiscoveryMessage("Web-wide search key saved securely in Supabase Vault.");
+      await loadDashboard();
+    }
+    setDiscoveryBusy(false);
+  };
+
   const saveDiscoverySettings = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setDiscoveryBusy(true);
     setDiscoveryMessage("");
     if (await persistDiscoverySettings()) {
-      setDiscoveryMessage("Discovery schedule and sources saved.");
+      setDiscoveryMessage("Discovery schedule, search rules, and sources saved.");
       await loadDashboard();
     }
     setDiscoveryBusy(false);
@@ -1109,7 +1204,7 @@ export default function Home() {
 
   const fetchJobsNow = async () => {
     setDiscoveryBusy(true);
-    setDiscoveryMessage("Checking your company career pages now...");
+    setDiscoveryMessage("Checking company boards and web search now...");
     if (!(await persistDiscoverySettings())) {
       setDiscoveryBusy(false);
       return;
@@ -1120,7 +1215,7 @@ export default function Home() {
     } else if (data?.skipped) {
       setDiscoveryMessage(data.reason || "The scan was skipped.");
     } else {
-      setDiscoveryMessage(`${data?.inserted ?? 0} new roles added. ${data?.duplicates ?? 0} duplicates safely skipped.`);
+      setDiscoveryMessage(`${data?.inserted ?? 0} new roles added. ${data?.duplicates ?? 0} already tracked. ${data?.skipped ?? 0} unsuitable roles skipped.`);
       await loadDashboard();
     }
     setDiscoveryBusy(false);
@@ -1433,7 +1528,8 @@ export default function Home() {
   const daysToAvailability = profile?.available_from
     ? Math.max(0, Math.ceil((new Date(`${profile.available_from}T00:00:00+08:00`).getTime() - currentDate.getTime()) / 86_400_000))
     : 0;
-  const sourceCount = settings?.discovery_source_urls?.length ?? 0;
+  const companySourceCount = settings?.discovery_source_urls?.length ?? 0;
+  const sourceCount = companySourceCount + (webSearchEnabled && webSearchConfigured ? 1 : 0);
   const discoveryReady = discoveryEnabled && sourceCount > 0;
   const scheduleZone = (settings?.discovery_timezone || discoveryTimezone) === "Asia/Singapore" ? "SGT" : (settings?.discovery_timezone || discoveryTimezone);
   const selectedSuggestion = selectedJob ? suggestResume(selectedJob, resumes) : null;
@@ -1546,6 +1642,7 @@ export default function Home() {
                 ))}
               </div>
               <div className="pipeline-tools">
+                <label className="date-sort"><span>Decision</span><select value={pipelineFilter} onChange={(event) => { setPipelineFilter(event.target.value); setVisibleJobCount(JOBS_PER_PAGE); }}><option>Active</option><option>Accepted</option><option>Applied</option><option>Rejected</option><option>All statuses</option></select></label>
                 <label className="date-sort feed-date-filter"><span>Feed date</span><select value={feedDate} onChange={(event) => { setFeedDate(event.target.value); setVisibleJobCount(JOBS_PER_PAGE); }}><option value="all">All feed dates</option>{availableFeedDates.map((date) => <option key={date} value={date}>{feedDateLabel(date)}</option>)}</select></label>
                 <label className="date-sort"><span>Sort by date</span><select value={jobSort} onChange={(event) => { setJobSort(event.target.value as "newest" | "oldest"); setVisibleJobCount(JOBS_PER_PAGE); }}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
                 <p>Showing {visibleJobs.length} of {filteredJobs.length}</p>
@@ -1555,7 +1652,7 @@ export default function Home() {
               {filteredJobs.length ? groupedVisibleJobs.map(([date, dateJobs]) => (
                 <Fragment key={date}>
                   <div className="feed-day-heading"><span>{feedDateLabel(date === "undated" ? null : date)}</span><small>{dateJobs.length} {dateJobs.length === 1 ? "job" : "jobs"} shown · highest match first</small></div>
-                  {dateJobs.map((job) => <JobCard key={job.id} job={job} saved={saved.includes(job.id)} onSave={() => toggleSave(job.id)} onOpen={() => openJobDetails(job)} />)}
+                  {dateJobs.map((job) => <JobCard key={job.id} job={job} saved={saved.includes(job.id)} onSave={() => toggleSave(job.id)} onOpen={() => openJobDetails(job)} onDecision={(decision) => void setJobDecision(job, decision)} decisionBusy={decisionBusyId === job.id} />)}
                 </Fragment>
               )) : (
                 <div className="empty-state"><span>⌕</span><h3>No matching jobs</h3><p>Try a different search, match filter, or feed date.</p></div>
@@ -1668,6 +1765,11 @@ export default function Home() {
             <div className={`company-mark large ${selectedJob.tone}`}>{selectedJob.initials}</div>
             <p className="company-name">{selectedJob.company}</p><h2 id="job-modal-title">{selectedJob.role}</h2>
             <div className="modal-score-row"><span className={`match-pill ${selectedJob.match.toLowerCase()}`}>{selectedJob.match}</span><strong>{selectedJob.score}/100 match</strong></div>
+            <div className="decision-actions modal-decision-actions" aria-label={`Decision for ${selectedJob.role}`}>
+              <button type="button" className={selectedJob.pipeline === "Accepted" ? "accepted active" : "accepted"} onClick={() => void setJobDecision(selectedJob, "Accepted")} disabled={decisionBusyId === selectedJob.id}>✓ Accept</button>
+              <button type="button" className={selectedJob.pipeline === "Applied" ? "applied active" : "applied"} onClick={() => void setJobDecision(selectedJob, "Applied")} disabled={decisionBusyId === selectedJob.id}>↗ Applied</button>
+              <button type="button" className={selectedJob.pipeline === "Rejected" ? "rejected active" : "rejected"} onClick={() => void setJobDecision(selectedJob, "Rejected")} disabled={decisionBusyId === selectedJob.id}>× Reject</button>
+            </div>
             <p className="modal-note">{selectedJob.note}</p>
             <div className="modal-checks">
               <div><span>✓</span><p><strong>Role level</strong>Graduate or entry-level scope</p></div>
@@ -1721,7 +1823,7 @@ export default function Home() {
                 <label><span>Date found</span><input type="date" value={jobDraft.date_found} onChange={(event) => setJobDraft({ ...jobDraft, date_found: event.target.value })} /></label>
                 <label><span>Match level</span><select value={jobDraft.match_level} onChange={(event) => setJobDraft({ ...jobDraft, match_level: event.target.value as JobDraft["match_level"] })}><option>Strong</option><option>Review</option><option>Blocked</option></select></label>
                 <label><span>Match score</span><input type="number" min="0" max="100" value={jobDraft.match_score} onChange={(event) => setJobDraft({ ...jobDraft, match_score: event.target.value })} /></label>
-                <label><span>Pipeline status</span><select value={jobDraft.pipeline} onChange={(event) => setJobDraft({ ...jobDraft, pipeline: event.target.value })}><option>Discovered</option><option>Review</option><option>Preparing</option><option>Applied</option><option>Interview</option><option>Offer</option><option>Rejected</option><option>Blocked</option></select></label>
+                <label><span>Pipeline status</span><select value={jobDraft.pipeline} onChange={(event) => setJobDraft({ ...jobDraft, pipeline: event.target.value })}><option>Discovered</option><option>Review</option><option>Preparing</option><option>Accepted</option><option>Applied</option><option>Interview</option><option>Offer</option><option>Rejected</option><option>Blocked</option></select></label>
                 <label><span>Sponsorship</span><select value={jobDraft.sponsorship} onChange={(event) => setJobDraft({ ...jobDraft, sponsorship: event.target.value })}><option>Unknown</option><option>Available</option><option>Possible</option><option>Not available</option></select></label>
                 <label><span>Location</span><input value={jobDraft.location} onChange={(event) => setJobDraft({ ...jobDraft, location: event.target.value })} /></label>
                 <label><span>Work mode</span><select value={jobDraft.work_mode} onChange={(event) => setJobDraft({ ...jobDraft, work_mode: event.target.value })}><option>Not specified</option><option>On-site</option><option>Hybrid</option><option>Remote</option></select></label>
@@ -1814,16 +1916,24 @@ export default function Home() {
             </div>
 
             <section className="security-panel discovery-panel">
-              <div className="security-heading"><div><p>Job discovery</p><h3>Schedule and company sources</h3></div><span className={discoveryEnabled && normalizedDiscoverySources().length ? "connection-status connected" : "connection-status"}>{discoveryEnabled ? normalizedDiscoverySources().length ? "Scheduled" : "Setup needed" : "Paused"}</span></div>
-              <p className="security-copy">The scanner checks public company career boards and saves eligible Singapore roles directly to Supabase. Paste one Greenhouse or Lever board URL per line. Repeated scans never create duplicate job records.</p>
+              <div className="security-heading"><div><p>Job discovery</p><h3>Schedule, web search, and company sources</h3></div><span className={discoveryEnabled && (normalizedDiscoverySources().length || webSearchConfigured) ? "connection-status connected" : "connection-status"}>{discoveryEnabled ? normalizedDiscoverySources().length || webSearchConfigured ? "Scheduled" : "Setup needed" : "Paused"}</span></div>
+              <p className="security-copy">The scout combines supported company boards with fresh web search results, then keeps only Singapore early-career technology roles. Repeated scans update known listings without creating duplicates.</p>
               <form className="discovery-form" onSubmit={saveDiscoverySettings}>
                 <label className="checkbox-field discovery-toggle"><input type="checkbox" checked={discoveryEnabled} onChange={(event) => setDiscoveryEnabled(event.target.checked)} /><span>Run automatically each day</span></label>
                 <div className="discovery-schedule-grid">
                   <label><span>Daily time</span><input type="time" value={discoveryTime} onChange={(event) => setDiscoveryTime(event.target.value)} required /></label>
                   <label><span>Timezone</span><select value={discoveryTimezone} onChange={(event) => setDiscoveryTimezone(event.target.value)}><option value="Asia/Singapore">Singapore - SGT</option><option value="Asia/Ho_Chi_Minh">Vietnam - ICT</option><option value="Asia/Kuala_Lumpur">Kuala Lumpur - MYT</option><option value="UTC">UTC</option></select></label>
                 </div>
-                <label><span>Company career board URLs</span><textarea rows={5} value={discoverySources} onChange={(event) => setDiscoverySources(event.target.value)} placeholder={"https://boards.greenhouse.io/company\nhttps://jobs.lever.co/company"} /></label>
-                <div className="discovery-actions"><button className="secondary-button" type="submit" disabled={discoveryBusy}>{discoveryBusy ? "Saving..." : "Save schedule"}</button><button className="primary-button compact" type="button" onClick={fetchJobsNow} disabled={discoveryBusy || !normalizedDiscoverySources().length}>{discoveryBusy ? "Fetching..." : "Fetch now"}</button></div>
+                <div className="web-search-heading"><label className="checkbox-field discovery-toggle"><input type="checkbox" checked={webSearchEnabled} onChange={(event) => setWebSearchEnabled(event.target.checked)} /><span>Include fresh web-wide search</span></label><span className={webSearchConfigured ? "connection-status connected" : "connection-status"}>{webSearchConfigured ? "Vault secured" : "API key needed"}</span></div>
+                <div className="discovery-schedule-grid">
+                  <label><span>Maximum required experience</span><select value={maxRequiredYears} onChange={(event) => setMaxRequiredYears(Number(event.target.value))}><option value={0}>No professional experience</option><option value={1}>Up to 1 year</option><option value={2}>Up to 2 years</option></select></label>
+                  <label><span>{webSearchConfigured ? "Replacement Brave Search key" : "Brave Search API key"}</span><input type="password" value={webSearchKey} onChange={(event) => setWebSearchKey(event.target.value)} autoComplete="off" placeholder={webSearchConfigured ? "Paste only to replace current key" : "Paste API key"} /></label>
+                </div>
+                <div className="web-key-actions"><p>The key is stored in encrypted Supabase Vault and is never shown again.</p><button className="secondary-button" type="button" onClick={saveWebSearchKey} disabled={discoveryBusy || !webSearchKey.trim()}>{webSearchConfigured ? "Replace web search key" : "Save web search key"}</button></div>
+                <label><span>Web search queries, one per line</span><textarea rows={5} value={webSearchQueries} onChange={(event) => setWebSearchQueries(event.target.value)} /></label>
+                <div className="personal-job-links"><div><strong>Personal job-board searches</strong><small>These open in your browser and use your existing login. The dashboard never stores your LinkedIn or Indeed password.</small></div><a className="secondary-button" href={LINKEDIN_JOB_SEARCH} target="_blank" rel="noreferrer">Open LinkedIn ↗</a><a className="secondary-button" href={INDEED_JOB_SEARCH} target="_blank" rel="noreferrer">Open Indeed ↗</a></div>
+                <label><span>Optional Greenhouse or Lever company board URLs</span><textarea rows={5} value={discoverySources} onChange={(event) => setDiscoverySources(event.target.value)} placeholder={"https://boards.greenhouse.io/company\nhttps://jobs.lever.co/company"} /></label>
+                <div className="discovery-actions"><button className="secondary-button" type="submit" disabled={discoveryBusy}>{discoveryBusy ? "Saving..." : "Save discovery settings"}</button><button className="primary-button compact" type="button" onClick={fetchJobsNow} disabled={discoveryBusy || (!normalizedDiscoverySources().length && !webSearchConfigured)}>{discoveryBusy ? "Fetching..." : "Fetch now"}</button></div>
               </form>
               <p className="connection-detail">{settings?.last_discovery_at ? `Last run: ${new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short", timeZone: settings.discovery_timezone || "Asia/Singapore" }).format(new Date(settings.last_discovery_at))}. ${settings.discovery_message || ""}` : settings?.discovery_message || "No live discovery run yet. Existing prepared records will remain until you delete them."}</p>
               {discoveryMessage ? <p className="discovery-message" role="status">{discoveryMessage}</p> : null}
