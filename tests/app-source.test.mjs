@@ -39,6 +39,26 @@ test("limits the job list and provides date sorting", () => {
   assert.match(pageSource, /Load more jobs/);
 });
 
+test("keeps job titles clear and provides accessible score and text controls", () => {
+  assert.match(pageSource, /--match-score/);
+  assert.match(globalStyles, /conic-gradient\(var\(--score-color\)/);
+  assert.match(globalStyles, /\.score-ring\{[^}]*bottom:18px/);
+  assert.match(globalStyles, /\.match-pill\.review\{[^}]*var\(--purple-bright\)/);
+  assert.match(globalStyles, /\.date-sort:after/);
+  assert.match(pageSource, /Dashboard text size/);
+  assert.match(pageSource, /TEXT_SIZE_KEY/);
+  assert.match(pageSource, /text-size-\$\{textSize\}/);
+  assert.match(globalStyles, /\.app-shell select option\{background:#151824;color:#f5f7ff\}/);
+  assert.match(globalStyles, /\.app-shell\.light select option\{background:#fff;color:#1b1d29\}/);
+});
+
+test("keeps Cloudflare verification visible on narrow screens", () => {
+  assert.match(pageSource, /container\.clientWidth < 300 \? "compact" : "flexible"/);
+  assert.match(pageSource, /new ResizeObserver\(renderWidget\)/);
+  assert.match(globalStyles, /\.turnstile-widget\{[^}]*justify-content:center/);
+  assert.match(globalStyles, /@media\(max-width:420px\)\{\.auth-shell\{padding:12px\}/);
+});
+
 test("uses Brian's logo, browser-time greeting, clock, and personal footer", () => {
   assert.match(pageSource, /src="\/brian-logo\.png"/);
   assert.match(layoutSource, /icon: "\/brian-logo\.png"/);
