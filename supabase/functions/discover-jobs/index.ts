@@ -30,6 +30,10 @@ type DiscoverySettings = {
   discovery_web_search_configured: boolean;
   discovery_search_queries: string[];
   discovery_max_required_years: number;
+  discovery_location: string;
+  discovery_country: string;
+  discovery_web_search_provider: "tavily";
+  discovery_monthly_credit_cap: number;
   last_scheduled_discovery_date: string | null;
 };
 
@@ -64,15 +68,25 @@ type LeverJob = {
   categories?: { location?: string; commitment?: string };
 };
 
-type BraveResult = {
+type TavilyResult = {
   title?: string;
   url?: string;
-  description?: string;
-  profile?: { long_name?: string };
+  content?: string;
+  raw_content?: string | null;
+  score?: number;
 };
 
-type BravePayload = {
-  web?: { results?: BraveResult[] };
+type TavilySearchPayload = {
+  results?: TavilyResult[];
+};
+
+type TavilyExtractPayload = {
+  results?: Array<{ url?: string; raw_content?: string }>;
+};
+
+type TavilyUsagePayload = {
+  key?: { usage?: number; limit?: number };
+  account?: { plan_usage?: number; plan_limit?: number; paygo_usage?: number };
 };
 
 const json = (request: Request, body: unknown, status = 200) =>
@@ -156,6 +170,14 @@ const sourceLabel = (hostname: string) => {
   if (hostname.includes("indeed.com")) return "Indeed";
   if (hostname.includes("mycareersfuture.gov.sg")) return "MyCareersFuture";
   if (hostname.includes("jobstreet.com")) return "JobStreet";
+  if (hostname.includes("myworkdayjobs.com") || hostname.includes("workday.com")) return "Workday";
+  if (hostname.includes("smartrecruiters.com")) return "SmartRecruiters";
+  if (hostname.includes("ashbyhq.com")) return "Ashby";
+  if (hostname.includes("workable.com")) return "Workable";
+  if (hostname.includes("successfactors.")) return "SAP SuccessFactors";
+  if (hostname.includes("icims.com")) return "iCIMS";
+  if (hostname.includes("oraclecloud.com")) return "Oracle Recruiting";
+  if (hostname.includes("bamboohr.com")) return "BambooHR";
   return hostname.replace(/^www\./, "");
 };
 
@@ -166,63 +188,122 @@ const isIndividualJobResult = (url: URL, title: string) => {
   if (host.includes("indeed.com")) return path.includes("/viewjob") || url.searchParams.has("jk");
   if (host.includes("mycareersfuture.gov.sg")) return path.includes("/job/");
   if (host.includes("jobstreet.com")) return /\/job\/\d+/.test(path);
-  if (/\b(job search|jobs in singapore|job vacancies|career opportunities)\b/i.test(title)) return false;
-  return !/(^|\/)jobs?\/?$|(^|\/)careers?\/?$|\/jobs\/search/.test(path);
+  if (host.includes("myworkdayjobs.com")) return /\/job\//.test(path);
+  if (host.includes("smartrecruiters.com")) return /\/jobs\/\d+/.test(path);
+  if (host.includes("ashbyhq.com")) return path.split("/").filter(Boolean).length >= 2;
+  if (host.includes("workable.com")) return /\/j\//.test(path) || path.split("/").filter(Boolean).length >= 2;
+  if (host.includes("icims.com")) return /\/jobs\/\d+/.test(path);
+  if (host.includes("oraclecloud.com")) return /\/job\/\d+/.test(path) || /jobapplications/.test(path);
+  if (host.includes("bamboohr.com")) return /\/careers\/\d+/.test(path);
+  if (/\b(job search|jobs in|job vacancies|career opportunities|search results)\b/i.test(title)) return false;
+  return !/(^|\/)jobs?\/?$|(^|\/)careers?\/?$|\/jobs\/search|\/search\/?$/.test(path)
+    && /job|career|position|vacan|opening|recruit|apply/.test(`${path} ${title}`.toLowerCase());
 };
 
-function webResultIdentity(result: BraveResult) {
+function webResultIdentity(result: TavilyResult, location: string) {
   const rawTitle = stripHtml(String(result.title ?? "Untitled role"));
-  const linkedIn = rawTitle.match(/^(.+?)\s+hiring\s+(.+?)\s+in\s+Singapore\b/i);
+  const linkedIn = rawTitle.match(new RegExp(`^(.+?)\\s+hiring\\s+(.+?)\\s+in\\s+${location.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i"));
   if (linkedIn) return { company: linkedIn[1].trim(), position: linkedIn[2].trim() };
 
   const cleanTitle = rawTitle
-    .replace(/\s*[|·]\s*(LinkedIn|Indeed|JobStreet|MyCareersFuture).*$/i, "")
+    .replace(/\s*[|·]\s*(LinkedIn|Indeed|JobStreet|MyCareersFuture|Careers|Jobs).*$/i, "")
     .trim();
   const parts = cleanTitle.split(/\s+(?:at|@|[-–—])\s+/i).filter(Boolean);
   if (parts.length > 1) return { position: parts[0].trim(), company: parts.at(-1)!.trim() };
-  return { position: cleanTitle, company: String(result.profile?.long_name ?? "Web opportunity") };
+  let company = "Web opportunity";
+  try { company = companyFromSlug(new URL(String(result.url ?? "")).hostname.replace(/^www\./, "").split(".")[0]); } catch { /* keep fallback */ }
+  return { position: cleanTitle, company };
 }
 
-async function fetchWebSearch(query: string, apiKey: string): Promise<Candidate[]> {
-  const params = new URLSearchParams({
-    q: `${query} jobs -senior -staff -principal -lead -manager -director`,
-    country: "SG",
-    search_lang: "en",
-    safesearch: "strict",
-    freshness: "pw",
-    count: "20",
+async function fetchTavilyUsage(apiKey: string) {
+  const response = await fetch("https://api.tavily.com/usage", {
+    headers: { Authorization: `Bearer ${apiKey}` },
   });
-  const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
-    headers: {
-      Accept: "application/json",
-      "X-Subscription-Token": apiKey,
-      "User-Agent": "Brian-Job-Command-Center/1.0",
-    },
+  if (!response.ok) throw new Error(`Tavily usage check returned ${response.status}`);
+  const payload = await response.json() as TavilyUsagePayload;
+  return {
+    usage: Number(payload.key?.usage ?? payload.account?.plan_usage ?? 0),
+    limit: Number(payload.key?.limit ?? payload.account?.plan_limit ?? 1000),
+    paygoUsage: Number(payload.account?.paygo_usage ?? 0),
+  };
+}
+
+async function fetchWebSearch(query: string, apiKey: string, location: string, country: string): Promise<TavilyResult[]> {
+  const response = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query: `${query} in ${location} jobs graduate junior entry level associate -senior -staff -principal -lead -manager -director`,
+      topic: "general",
+      search_depth: "basic",
+      max_results: 12,
+      include_answer: false,
+      include_images: false,
+      include_raw_content: false,
+      time_range: "week",
+      country: country.toLowerCase(),
+    }),
   });
-  if (!response.ok) throw new Error(`Web search returned ${response.status}`);
-  const payload = await response.json() as BravePayload;
-  return (payload.web?.results ?? []).flatMap((result) => {
+  if (!response.ok) throw new Error(`Tavily search returned ${response.status}`);
+  const payload = await response.json() as TavilySearchPayload;
+  return (payload.results ?? []).filter((result) => {
     try {
       const jobUrl = new URL(String(result.url ?? ""));
-      if (jobUrl.protocol !== "https:") return [];
-      if (!isIndividualJobResult(jobUrl, String(result.title ?? ""))) return [];
-      const identity = webResultIdentity(result);
+      return jobUrl.protocol === "https:" && isIndividualJobResult(jobUrl, String(result.title ?? ""));
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function extractWebResults(results: TavilyResult[], apiKey: string, location: string): Promise<Candidate[]> {
+  const extracted = new Map<string, string>();
+  const uniqueResults = [...new Map(results.map((result) => [canonicalUrl(String(result.url ?? "")), result])).values()];
+  const batches = Array.from({ length: Math.ceil(uniqueResults.length / 20) }, (_, index) => uniqueResults.slice(index * 20, index * 20 + 20));
+  await Promise.all(batches.map(async (batch) => {
+    const response = await fetch("https://api.tavily.com/extract", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ urls: batch.map((result) => result.url), extract_depth: "basic", format: "markdown", include_images: false }),
+    });
+    if (!response.ok) return;
+    const payload = await response.json() as TavilyExtractPayload;
+    for (const result of payload.results ?? []) {
+      if (result.url) extracted.set(canonicalUrl(result.url), stripHtml(String(result.raw_content ?? "")));
+    }
+  }));
+
+  return uniqueResults.flatMap((result) => {
+    try {
+      const jobUrl = new URL(String(result.url ?? ""));
+      const identity = webResultIdentity(result, location);
+      const description = extracted.get(canonicalUrl(jobUrl.toString())) || stripHtml(String(result.content ?? ""));
       return [{
         company: identity.company,
         position: identity.position,
-        location: "Singapore",
-        employmentType: null,
+        location,
+        employmentType: /\bpart[- ]?time\b/i.test(description) ? "Part-time" : /\bcontract\b/i.test(description) ? "Contract" : /\bintern(?:ship)?\b/i.test(description) ? "Internship" : null,
         jobUrl: jobUrl.toString(),
         careerPage: `${jobUrl.protocol}//${jobUrl.hostname}`,
-        source: "Web search",
+        source: "Tavily web discovery",
         atsPlatform: sourceLabel(jobUrl.hostname),
         externalId: canonicalUrl(jobUrl.toString()),
-        description: stripHtml(String(result.description ?? "")),
+        description,
       }];
     } catch {
       return [];
     }
   });
+}
+
+function buildWebQueries(configuredQueries: string[], location: string) {
+  const countries = /\b(?:singapore|malaysia|vietnam|viet nam|thailand|indonesia|philippines|australia)\b/gi;
+  const configured = configuredQueries.map((query) => query.replace(countries, " ").replace(/\s+/g, " ").trim());
+  const coverageQueries = [
+    `early career technology jobs ${location} Workday Ashby SmartRecruiters Workable iCIMS Oracle`,
+    `company careers graduate technology roles ${location} software cybersecurity cloud IT support`,
+  ];
+  return [...new Map([...configured, ...coverageQueries].filter(Boolean).map((query) => [query.toLowerCase(), query])).values()].slice(0, 6);
 }
 
 function localClock(timeZone: string) {
@@ -261,20 +342,39 @@ function requiredExperienceYears(value: string) {
   return required;
 }
 
-function assessEligibility(candidate: Candidate, maxRequiredYears: number) {
+const countryLocationAliases: Record<string, string[]> = {
+  singapore: ["singapore"],
+  malaysia: ["malaysia", "kuala lumpur", "selangor", "penang", "johor"],
+  vietnam: ["vietnam", "viet nam", "ho chi minh", "hanoi", "ha noi", "da nang"],
+  thailand: ["thailand", "bangkok"],
+  indonesia: ["indonesia", "jakarta"],
+  philippines: ["philippines", "manila", "makati", "taguig"],
+  australia: ["australia", "sydney", "melbourne", "brisbane", "perth"],
+};
+
+function isTargetLocation(candidate: Candidate, targetLocation: string, targetCountry: string) {
+  if (/\bremote\b/i.test(targetLocation)) return /\bremote\b/i.test(`${candidate.location} ${candidate.description}`);
+  const locationText = `${candidate.location} ${candidate.description}`.toLowerCase();
+  const terms = [targetLocation.toLowerCase(), ...(countryLocationAliases[targetCountry.toLowerCase()] ?? [targetCountry.toLowerCase()])]
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2);
+  return terms.some((term) => locationText.includes(term));
+}
+
+function assessEligibility(candidate: Candidate, maxRequiredYears: number, targetLocation: string, targetCountry: string) {
   const title = candidate.position.toLowerCase();
   const text = `${candidate.position} ${candidate.location} ${candidate.description}`.toLowerCase();
-  const location = candidate.location.toLowerCase();
   const seniorTitle = /\b(senior|sr\.?|staff|principal|lead|leader|manager|head|director|vice president|vp|architect|expert)\b/.test(title);
   const targetRole = /(software|application|web|backend|front.?end|full.?stack|mobile|android|ios|java|python|developer|out.?systems|power.?platform|service.?now|ui.?path|artificial intelligence|\bai\b|machine learning|data engineer|data scientist|research engineer|quality analyst|technology analyst|qa engineer|test automation|security|cyber|soc|vulnerab|penetration test|grc|information security|it support|help.?desk|service desk|desktop support|technical support|network engineer|database administrator|systems? administrator|cloud engineer|devops|site reliability)/.test(title);
   const mandatoryMandarin = /mandarin.{0,35}(required|mandatory|must|essential)/.test(text)
     || /(required|mandatory|must|essential).{0,35}mandarin/.test(text)
     || /chinese language.{0,35}(required|mandatory|must)/.test(text);
-  const restrictedResidency = /(only|must be|restricted to|open only to).{0,45}(singaporean|singapore citizen|permanent resident|singapore pr)/.test(text)
-    || /(singaporean|singapore citizen|permanent resident|singapore pr).{0,30}(only|required|must)/.test(text);
-  const singaporeBased = /singapore/.test(location);
+  const restrictedResidency = /(only|must be|restricted to|open only to).{0,60}(citizen|citizenship|permanent resident|\bpr\b|existing work authori[sz]ation|right to work)/.test(text)
+    || /(citizen|citizenship|permanent resident|\bpr\b|existing work authori[sz]ation|right to work).{0,45}(only|required|must)/.test(text)
+    || /(?:no|without)\s+(?:visa\s+)?sponsorship|unable to sponsor|will not sponsor/.test(text);
+  const targetBased = isTargetLocation(candidate, targetLocation, targetCountry);
   const experienceYears = requiredExperienceYears(text);
-  if (!singaporeBased) return { eligible: false, reason: "outside Singapore", experienceYears };
+  if (!targetBased) return { eligible: false, reason: `outside ${targetLocation}`, experienceYears };
   if (!targetRole) return { eligible: false, reason: "outside target roles", experienceYears };
   if (seniorTitle) return { eligible: false, reason: "senior title", experienceYears };
   if (experienceYears > maxRequiredYears) return { eligible: false, reason: `requires ${experienceYears}+ years`, experienceYears };
@@ -340,7 +440,7 @@ Deno.serve(async (request: Request) => {
 
   const { data: settingsData, error: settingsError } = await service
     .from("app_settings")
-    .select("discovery_enabled, discovery_time, discovery_timezone, discovery_source_urls, discovery_web_search_enabled, discovery_web_search_configured, discovery_search_queries, discovery_max_required_years, last_scheduled_discovery_date")
+    .select("discovery_enabled, discovery_time, discovery_timezone, discovery_source_urls, discovery_web_search_enabled, discovery_web_search_configured, discovery_search_queries, discovery_max_required_years, discovery_location, discovery_country, discovery_web_search_provider, discovery_monthly_credit_cap, last_scheduled_discovery_date")
     .eq("id", 1)
     .single();
   if (settingsError) return json(request, { error: settingsError.message }, 500);
@@ -355,7 +455,7 @@ Deno.serve(async (request: Request) => {
   if (!settings.discovery_source_urls?.length && !webSearchKey) {
     await service.from("app_settings").update({
       discovery_status: "Waiting for sources",
-      discovery_message: "Add a supported company board or configure web-wide search.",
+      discovery_message: "Add a direct company board or configure Tavily web discovery.",
       updated_at: new Date().toISOString(),
     }).eq("id", 1);
     return json(request, { skipped: true, reason: "No discovery source is configured" });
@@ -393,25 +493,44 @@ Deno.serve(async (request: Request) => {
     if (result.error) failures.push(result.error);
   }
 
-  const webQueries = (settings.discovery_search_queries ?? []).map((query) => query.trim()).filter(Boolean).slice(0, 6);
+  const targetLocation = settings.discovery_location?.trim() || "Singapore";
+  const targetCountry = settings.discovery_country?.trim().toLowerCase() || "singapore";
+  const webQueries = buildWebQueries(settings.discovery_search_queries ?? [], targetLocation);
+  let tavilyUsage: { usage: number; limit: number; paygoUsage: number } | null = null;
+  let webSearchRan = false;
   if (webSearchKey && webQueries.length) {
-    const webResults = await Promise.all(webQueries.map(async (query) => {
-      try {
-        return { rows: await fetchWebSearch(query, webSearchKey), error: null };
-      } catch (error) {
-        return { rows: [] as Candidate[], error: error instanceof Error ? error.message : `Could not search for ${query}` };
+    try {
+      tavilyUsage = await fetchTavilyUsage(webSearchKey);
+      const safetyCap = Math.min(settings.discovery_monthly_credit_cap ?? 900, tavilyUsage.limit || 1000);
+      const estimatedCredits = webQueries.length + Math.ceil((webQueries.length * 12) / 5);
+      if (tavilyUsage.usage + estimatedCredits > safetyCap) {
+        failures.push(`Tavily safety limit reached at ${tavilyUsage.usage} of ${safetyCap} allowed monthly credits`);
+      } else {
+        const webResults = await Promise.all(webQueries.map(async (query) => {
+          try {
+            return { rows: await fetchWebSearch(query, webSearchKey, targetLocation, targetCountry), error: null };
+          } catch (error) {
+            return { rows: [] as TavilyResult[], error: error instanceof Error ? error.message : `Could not search for ${query}` };
+          }
+        }));
+        const searchHits: TavilyResult[] = [];
+        for (const result of webResults) {
+          searchHits.push(...result.rows);
+          if (result.error) failures.push(result.error);
+        }
+        if (searchHits.length) allCandidates.push(...await extractWebResults(searchHits, webSearchKey, targetLocation));
+        webSearchRan = true;
+        tavilyUsage = await fetchTavilyUsage(webSearchKey);
       }
-    }));
-    for (const result of webResults) {
-      allCandidates.push(...result.rows);
-      if (result.error) failures.push(result.error);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : "Could not use Tavily web discovery");
     }
   }
 
   const uniqueCandidates = [...new Map(allCandidates.map((candidate) => [canonicalUrl(candidate.jobUrl), candidate])).values()];
   const assessments = uniqueCandidates.map((candidate) => ({
     candidate,
-    assessment: assessEligibility(candidate, settings.discovery_max_required_years ?? 1),
+    assessment: assessEligibility(candidate, settings.discovery_max_required_years ?? 1, targetLocation, targetCountry),
   }));
   const eligible = assessments.filter(({ assessment }) => assessment.eligible).map(({ candidate }) => candidate);
   const skippedByReason = assessments.filter(({ assessment }) => !assessment.eligible).reduce<Record<string, number>>((counts, { assessment }) => {
@@ -478,7 +597,7 @@ Deno.serve(async (request: Request) => {
 
   const now = new Date().toISOString();
   const attemptedSources = parsedSources.length + (webSearchKey ? webQueries.length : 0);
-  const checkedSources = parsedSources.length + (webSearchKey && webQueries.length ? 1 : 0);
+  const checkedSources = parsedSources.length + (webSearchRan ? 1 : 0);
   const status = attemptedSources > 0 && failures.length >= attemptedSources ? "Source error" : "Completed";
   const skipped = uniqueCandidates.length - eligible.length;
   const message = `${inserted} new, ${eligible.length - inserted} already tracked or repeated, ${skipped} unsuitable skipped. ${checkedSources} source type${checkedSources === 1 ? "" : "s"} checked.`
@@ -488,6 +607,8 @@ Deno.serve(async (request: Request) => {
     last_scheduled_discovery_date: action === "scheduled" ? localDate : settings.last_scheduled_discovery_date,
     discovery_status: status,
     discovery_message: message,
+    discovery_last_credit_usage: tavilyUsage?.usage ?? null,
+    discovery_last_credit_limit: tavilyUsage?.limit ?? null,
     updated_at: now,
   }).eq("id", 1);
 
@@ -499,6 +620,10 @@ Deno.serve(async (request: Request) => {
     refreshed,
     sources: checkedSources,
     webSearchConfigured: Boolean(webSearchKey),
+    webSearchProvider: "tavily",
+    webSearchRan,
+    targetLocation,
+    tavilyUsage,
     skipped,
     skippedByReason,
     sourceErrors: failures,
