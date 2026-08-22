@@ -31,6 +31,26 @@ type Resume = {
   sort_order: number;
   storage_path?: string | null;
   original_filename?: string | null;
+  resume_files?: ResumeFile[];
+};
+
+type ResumeFile = {
+  id: number;
+  resume_code: string;
+  file_format: "docx" | "pdf";
+  storage_path: string;
+  original_filename: string;
+  mime_type: string;
+  file_size: number;
+};
+
+type DiscoveryCriteriaSuggestion = {
+  search_queries: string[];
+  target_role_keywords: string[];
+  excluded_title_keywords: string[];
+  max_required_years: number;
+  detected_skills: string[];
+  rationale: string;
 };
 
 type PrivateProfile = {
@@ -67,6 +87,12 @@ type AppSettings = {
   discovery_web_search_enabled?: boolean;
   discovery_web_search_configured?: boolean;
   discovery_search_queries?: string[];
+  discovery_target_role_keywords?: string[];
+  discovery_excluded_title_keywords?: string[];
+  discovery_criteria_suggestion?: DiscoveryCriteriaSuggestion | null;
+  discovery_criteria_suggestion_status?: "none" | "pending" | "approved" | "rejected";
+  discovery_criteria_suggestion_source_resume?: string | null;
+  discovery_criteria_suggestion_created_at?: string | null;
   discovery_max_required_years?: number;
   discovery_location?: string;
   discovery_country?: string;
@@ -680,6 +706,8 @@ export default function Home() {
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [webSearchConfigured, setWebSearchConfigured] = useState(false);
   const [webSearchQueries, setWebSearchQueries] = useState(DEFAULT_DISCOVERY_QUERIES.join("\n"));
+  const [targetRoleKeywords, setTargetRoleKeywords] = useState("");
+  const [excludedTitleKeywords, setExcludedTitleKeywords] = useState("");
   const [webSearchKey, setWebSearchKey] = useState("");
   const [exaSearchKey, setExaSearchKey] = useState("");
   const [firecrawlSearchKey, setFirecrawlSearchKey] = useState("");
@@ -712,7 +740,7 @@ export default function Home() {
   const [profileDraft, setProfileDraft] = useState<PrivateProfile | null>(null);
   const [resumeEditorOpen, setResumeEditorOpen] = useState(false);
   const [resumeDraft, setResumeDraft] = useState<Resume | null>(null);
-  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [resumeFiles, setResumeFiles] = useState<File[]>([]);
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorMessage, setEditorMessage] = useState("");
   const [currentDate, setCurrentDate] = useState(() => new Date());
@@ -739,7 +767,7 @@ export default function Home() {
 
     const [jobsResult, resumesResult, profileResult, settingsResult] = await Promise.all([
       supabase.from("jobs").select("*").order("match_score", { ascending: false }).order("date_found", { ascending: false }),
-      supabase.from("resumes").select("*").order("sort_order", { ascending: true }),
+      supabase.from("resumes").select("*, resume_files(*)").order("sort_order", { ascending: true }),
       supabase.from("private_profile").select("*").eq("id", 1).single(),
       supabase.from("app_settings").select("*").eq("id", 1).single(),
     ]);
@@ -763,6 +791,8 @@ export default function Home() {
       setWebSearchEnabled(nextSettings.discovery_web_search_enabled ?? true);
       setWebSearchConfigured(nextSettings.discovery_web_search_configured ?? false);
       setWebSearchQueries((nextSettings.discovery_search_queries?.length ? nextSettings.discovery_search_queries : DEFAULT_DISCOVERY_QUERIES).join("\n"));
+      setTargetRoleKeywords((nextSettings.discovery_target_role_keywords ?? []).join("\n"));
+      setExcludedTitleKeywords((nextSettings.discovery_excluded_title_keywords ?? []).join("\n"));
       setMaxRequiredYears(nextSettings.discovery_max_required_years ?? 1);
       setDiscoveryLocation(nextSettings.discovery_location || "Singapore");
       setDiscoveryCountry(nextSettings.discovery_country || "singapore");
@@ -1116,7 +1146,12 @@ export default function Home() {
     .split(/\r?\n/)
     .map((searchQuery) => searchQuery.trim())
     .filter(Boolean)
-    .slice(0, 6);
+    .slice(0, 8);
+
+  const normalizedCriteriaLines = (value: string, limit = 80) => [...new Set(value
+    .split(/\r?\n|,/)
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean))].slice(0, limit);
 
   const discoveryStateCopy = (enabled: boolean, sourceTotal: number, webReady = webSearchEnabled && webSearchConfigured) => ({
     status: enabled ? sourceTotal || webReady ? "Scheduled" : "Waiting for sources" : "Paused",
@@ -1174,12 +1209,18 @@ export default function Home() {
 
     const stateCopy = discoveryStateCopy(discoveryEnabled, sources.length);
     const queries = normalizedWebSearchQueries();
+    const roleKeywords = normalizedCriteriaLines(targetRoleKeywords);
+    const excludedKeywords = normalizedCriteriaLines(excludedTitleKeywords, 40);
     if (webSearchEnabled && !queries.length) {
       setDiscoveryMessage("Add at least one web search query or turn web search off.");
       return false;
     }
     if (discoveryLocation.trim().length < 2) {
       setDiscoveryMessage("Enter the city, region, or country where you want to find jobs.");
+      return false;
+    }
+    if (!roleKeywords.length || !excludedKeywords.length) {
+      setDiscoveryMessage("Keep at least one target role keyword and one excluded title keyword.");
       return false;
     }
     const { error } = await supabase.from("app_settings").update({
@@ -1189,6 +1230,8 @@ export default function Home() {
       discovery_source_urls: sources,
       discovery_web_search_enabled: webSearchEnabled,
       discovery_search_queries: queries,
+      discovery_target_role_keywords: roleKeywords,
+      discovery_excluded_title_keywords: excludedKeywords,
       discovery_max_required_years: maxRequiredYears,
       discovery_location: discoveryLocation.trim(),
       discovery_country: discoveryCountry,
@@ -1203,6 +1246,32 @@ export default function Home() {
       return false;
     }
     return true;
+  };
+
+  const reviewCriteriaSuggestion = async (decision: "approved" | "rejected") => {
+    const suggestion = settings?.discovery_criteria_suggestion;
+    if (!suggestion || settings?.discovery_criteria_suggestion_status !== "pending") return;
+    setDiscoveryBusy(true);
+    setDiscoveryMessage("");
+    const payload = decision === "approved" ? {
+      discovery_search_queries: suggestion.search_queries,
+      discovery_target_role_keywords: suggestion.target_role_keywords,
+      discovery_excluded_title_keywords: suggestion.excluded_title_keywords,
+      discovery_max_required_years: suggestion.max_required_years,
+      discovery_criteria_suggestion_status: decision,
+      discovery_criteria_updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } : {
+      discovery_criteria_suggestion_status: decision,
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from("app_settings").update(payload).eq("id", 1);
+    if (error) setDiscoveryMessage(error.message);
+    else {
+      setDiscoveryMessage(decision === "approved" ? "Resume suggestion approved. Future scans now use the new criteria." : "Resume suggestion dismissed. The active criteria were not changed.");
+      await loadDashboard();
+    }
+    setDiscoveryBusy(false);
   };
 
   const saveWebSearchKey = async () => {
@@ -1506,15 +1575,14 @@ export default function Home() {
 
   const openResumeEditor = (resume: Resume) => {
     setResumeDraft({ ...resume });
-    setResumeFile(null);
+    setResumeFiles([]);
     setEditorMessage("");
     setResumeEditorOpen(true);
   };
 
-  const downloadResume = async (resume: Resume) => {
-    if (!resume.storage_path) return;
+  const downloadResumeFile = async (resumeFile: Pick<ResumeFile, "storage_path">) => {
     setDataError("");
-    const { data, error } = await supabase.storage.from("resume-files").createSignedUrl(resume.storage_path, 60);
+    const { data, error } = await supabase.storage.from("resume-files").createSignedUrl(resumeFile.storage_path, 60);
     if (error || !data?.signedUrl) {
       setDataError(error?.message || "The resume file could not be opened.");
       return;
@@ -1522,49 +1590,152 @@ export default function Home() {
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
+  const downloadResume = async (resume: Resume) => {
+    const primary = resume.resume_files?.find((file) => file.file_format === "docx")
+      || resume.resume_files?.[0]
+      || (resume.storage_path ? { storage_path: resume.storage_path } : null);
+    if (primary) await downloadResumeFile(primary);
+  };
+
+  const analyseResumeForCriteria = async (file: File) => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) throw new Error("Your session expired. Sign in again before analysing a resume.");
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch("/api/resume-criteria", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.suggestion) throw new Error(result.error || "The resume could not be analysed.");
+    return result.suggestion as DiscoveryCriteriaSuggestion;
+  };
+
   const saveResume = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!resumeDraft) return;
     setEditorBusy(true);
     setEditorMessage("");
-    let storagePath = resumeDraft.storage_path || null;
-    let originalFilename = resumeDraft.original_filename || null;
+    const selectedFormats = resumeFiles.map((file) => file.name.toLowerCase().endsWith(".pdf") ? "pdf" : "docx");
+    if (new Set(selectedFormats).size !== selectedFormats.length) {
+      setEditorMessage("Choose at most one DOCX and one PDF for this resume.");
+      setEditorBusy(false);
+      return;
+    }
+    const invalidFile = resumeFiles.find((file) => file.size > 8 * 1024 * 1024 || !/\.(docx|pdf)$/i.test(file.name));
+    if (invalidFile) {
+      setEditorMessage(`${invalidFile.name} must be a DOCX or PDF no larger than 8 MB.`);
+      setEditorBusy(false);
+      return;
+    }
 
-    if (resumeFile) {
-      const safeFilename = resumeFile.name.replace(/[^a-zA-Z0-9._-]/g, "-");
-      const nextPath = `${resumeDraft.code}/${Date.now()}-${safeFilename}`;
-      const { error: uploadError } = await supabase.storage.from("resume-files").upload(nextPath, resumeFile, {
+    let suggestion: DiscoveryCriteriaSuggestion | null = null;
+    let analysisMessage = "";
+    if (resumeFiles.length) {
+      try {
+        suggestion = await analyseResumeForCriteria(resumeFiles.find((file) => /\.docx$/i.test(file.name)) || resumeFiles[0]);
+      } catch (error) {
+        analysisMessage = error instanceof Error ? error.message : "Criteria analysis was unavailable.";
+      }
+    }
+
+    const previousFiles = resumeDraft.resume_files ?? [];
+    const uploaded: ResumeFile[] = [];
+    for (const [index, file] of resumeFiles.entries()) {
+      const format = selectedFormats[index] as "docx" | "pdf";
+      const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+      const nextPath = `${resumeDraft.code}/${Date.now()}-${format}-${safeFilename}`;
+      const { error: uploadError } = await supabase.storage.from("resume-files").upload(nextPath, file, {
         cacheControl: "3600",
+        contentType: file.type || (format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         upsert: false,
       });
       if (uploadError) {
+        if (uploaded.length) await supabase.storage.from("resume-files").remove(uploaded.map((item) => item.storage_path));
         setEditorMessage(uploadError.message);
         setEditorBusy(false);
         return;
       }
-      storagePath = nextPath;
-      originalFilename = resumeFile.name;
+      uploaded.push({
+        id: 0,
+        resume_code: resumeDraft.code,
+        file_format: format,
+        storage_path: nextPath,
+        original_filename: file.name,
+        mime_type: file.type || (format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        file_size: file.size,
+      });
     }
+
+    if (uploaded.length) {
+      const fileRows = uploaded.map((file) => ({
+        resume_code: file.resume_code,
+        file_format: file.file_format,
+        storage_path: file.storage_path,
+        original_filename: file.original_filename,
+        mime_type: file.mime_type,
+        file_size: file.file_size,
+      }));
+      const { error: fileRowError } = await supabase.from("resume_files").upsert(fileRows, { onConflict: "resume_code,file_format" });
+      if (fileRowError) {
+        await supabase.storage.from("resume-files").remove(uploaded.map((item) => item.storage_path));
+        setEditorMessage(fileRowError.message);
+        setEditorBusy(false);
+        return;
+      }
+    }
+
+    const nextDocx = uploaded.find((file) => file.file_format === "docx") || previousFiles.find((file) => file.file_format === "docx");
+    const nextPrimary = nextDocx || uploaded[0] || previousFiles[0] || null;
 
     const { error } = await supabase.from("resumes").update({
       name: resumeDraft.name.trim(),
       fit: resumeDraft.fit.trim(),
       recommendation: resumeDraft.recommendation.trim(),
-      storage_path: storagePath,
-      original_filename: originalFilename,
+      storage_path: nextPrimary?.storage_path || resumeDraft.storage_path || null,
+      original_filename: nextPrimary?.original_filename || resumeDraft.original_filename || null,
       updated_at: new Date().toISOString(),
     }).eq("code", resumeDraft.code);
     if (error) {
-      if (resumeFile && storagePath) await supabase.storage.from("resume-files").remove([storagePath]);
+      for (const uploadedFile of uploaded) {
+        const previous = previousFiles.find((file) => file.file_format === uploadedFile.file_format);
+        if (previous) {
+          await supabase.from("resume_files").upsert({
+            resume_code: previous.resume_code,
+            file_format: previous.file_format,
+            storage_path: previous.storage_path,
+            original_filename: previous.original_filename,
+            mime_type: previous.mime_type,
+            file_size: previous.file_size,
+          }, { onConflict: "resume_code,file_format" });
+        } else {
+          await supabase.from("resume_files").delete().eq("resume_code", resumeDraft.code).eq("file_format", uploadedFile.file_format);
+        }
+      }
+      if (uploaded.length) await supabase.storage.from("resume-files").remove(uploaded.map((item) => item.storage_path));
       setEditorMessage(error.message);
     }
     else {
-      if (resumeFile && resumeDraft.storage_path && resumeDraft.storage_path !== storagePath) {
-        await supabase.storage.from("resume-files").remove([resumeDraft.storage_path]);
+      const replacedPaths = previousFiles
+        .filter((previous) => uploaded.some((file) => file.file_format === previous.file_format) && !uploaded.some((file) => file.storage_path === previous.storage_path))
+        .map((file) => file.storage_path);
+      if (replacedPaths.length) await supabase.storage.from("resume-files").remove(replacedPaths);
+      if (suggestion) {
+        await supabase.from("app_settings").update({
+          discovery_criteria_suggestion: suggestion,
+          discovery_criteria_suggestion_status: "pending",
+          discovery_criteria_suggestion_source_resume: resumeDraft.code,
+          discovery_criteria_suggestion_created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", 1);
       }
       setResumeEditorOpen(false);
-      setResumeFile(null);
+      setResumeFiles([]);
       await loadDashboard();
+      if (suggestion) setDiscoveryMessage(`A new scout criteria proposal was prepared from ${resumeDraft.name}. Review it in Security and connections before approval.`);
+      else if (analysisMessage) setDataError(`Resume saved, but no criteria proposal was created: ${analysisMessage}`);
     }
     setEditorBusy(false);
   };
@@ -1736,7 +1907,7 @@ export default function Home() {
           <section id="resumes" className="resumes-section">
             <div className="section-heading">
               <div><p className="eyebrow">Document intelligence</p><h2>Resume command center</h2></div>
-              <p className="section-note">Three editable masters. Tailoring uses verified facts only.</p>
+              <p className="section-note">Private upload portal with DOCX and PDF versions. Tailoring uses verified facts only.</p>
             </div>
 
             <div className="resume-layout">
@@ -1750,7 +1921,7 @@ export default function Home() {
                       <small>{resume.recommendation}</small>
                     </div>
                     <div className="resume-actions">
-                      {resume.storage_path ? <button className="resume-open" onClick={() => downloadResume(resume)} aria-label={`Download ${resume.name} resume`}>↓</button> : null}
+                      {resume.resume_files?.length ? [...resume.resume_files].sort((left, right) => left.file_format.localeCompare(right.file_format)).map((file) => <button key={file.id} className="resume-format-button" onClick={() => downloadResumeFile(file)} aria-label={`Download ${resume.name} ${file.file_format.toUpperCase()}`}>{file.file_format.toUpperCase()}</button>) : resume.storage_path ? <button className="resume-open" onClick={() => downloadResume(resume)} aria-label={`Download ${resume.name} resume`}>↓</button> : null}
                       <button className="resume-open" onClick={() => openResumeEditor(resume)} aria-label={`Edit ${resume.name} resume`}>✎</button>
                     </div>
                   </article>
@@ -1964,8 +2135,8 @@ export default function Home() {
               <label><span>Name</span><input value={resumeDraft.name} onChange={(event) => setResumeDraft({ ...resumeDraft, name: event.target.value })} /></label>
               <label><span>Best fit</span><textarea rows={3} value={resumeDraft.fit} onChange={(event) => setResumeDraft({ ...resumeDraft, fit: event.target.value })} /></label>
               <label><span>Recommendation</span><textarea rows={3} value={resumeDraft.recommendation} onChange={(event) => setResumeDraft({ ...resumeDraft, recommendation: event.target.value })} /></label>
-              <label className="file-field"><span>Resume document</span><input type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setResumeFile(event.target.files?.[0] || null)} /></label>
-              <p className="editor-note">{resumeFile ? `${resumeFile.name} will replace the current file.` : resumeDraft.original_filename ? `Current private file: ${resumeDraft.original_filename}` : "Upload an editable DOCX or a PDF. Files stay private and require your administrator session."}</p>
+              <label className="file-field"><span>Resume documents</span><input type="file" multiple accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setResumeFiles(Array.from(event.target.files ?? []))} /></label>
+              <p className="editor-note">{resumeFiles.length ? `${resumeFiles.map((file) => file.name).join(" and ")} will replace the matching formats. A criteria proposal will be prepared for review.` : resumeDraft.resume_files?.length ? `Current private formats: ${resumeDraft.resume_files.map((file) => file.file_format.toUpperCase()).join(" and ")}.` : resumeDraft.original_filename ? `Current private file: ${resumeDraft.original_filename}` : "Upload one DOCX, one PDF, or both. Files stay private and require your administrator session."}</p>
               {editorMessage ? <p className="editor-message">{editorMessage}</p> : null}
               <div className="editor-actions resume-editor-actions"><span />{resumeDraft.storage_path ? <button type="button" className="secondary-button" onClick={() => downloadResume(resumeDraft)}>Download current</button> : null}<button type="button" className="secondary-button" onClick={() => setResumeEditorOpen(false)}>Cancel</button><button className="primary-button" disabled={editorBusy}>{editorBusy ? "Saving..." : "Save resume"}</button></div>
             </form>
@@ -2015,6 +2186,23 @@ export default function Home() {
                 </div>
                 <div className="web-key-actions"><p>Paste any or all keys, then save once. Empty fields preserve previously saved keys. Every key is encrypted in Supabase Vault and is never returned to the browser.</p><button className="secondary-button" type="button" onClick={saveWebSearchKey} disabled={discoveryBusy || ![webSearchKey, exaSearchKey, firecrawlSearchKey, braveSearchKey, serpApiSearchKey, serperSearchKey].some((key) => key.trim())}>{webSearchConfigured ? "Save or replace provider keys" : "Save provider keys"}</button></div>
                 <label><span>Target role searches, one per line</span><textarea rows={5} value={webSearchQueries} onChange={(event) => setWebSearchQueries(event.target.value)} /><small>The saved location is added automatically. Two extra searches cover major ATS platforms and independent company career sites.</small></label>
+                <div className="criteria-editor-grid">
+                  <label><span>Accepted role keywords, one per line</span><textarea rows={8} value={targetRoleKeywords} onChange={(event) => setTargetRoleKeywords(event.target.value)} /><small>A listing title must match at least one of these terms.</small></label>
+                  <label><span>Rejected title keywords, one per line</span><textarea rows={8} value={excludedTitleKeywords} onChange={(event) => setExcludedTitleKeywords(event.target.value)} /><small>Titles containing one of these terms are rejected before scoring.</small></label>
+                </div>
+                <p className="criteria-save-note">Manual edits become active only when you press Save discovery settings. Resume uploads create a separate proposal and never change active criteria automatically.</p>
+                {settings?.discovery_criteria_suggestion_status === "pending" && settings.discovery_criteria_suggestion ? <article className="criteria-proposal">
+                  <div className="criteria-proposal-heading"><div><small>Resume suggestion awaiting review</small><strong>Proposed scout criteria from {settings.discovery_criteria_suggestion_source_resume || "latest resume"}</strong></div><span>Not active</span></div>
+                  <p>{settings.discovery_criteria_suggestion.rationale}</p>
+                  <div className="criteria-proposal-grid">
+                    <div><small>Searches</small><strong>{settings.discovery_criteria_suggestion.search_queries.length}</strong></div>
+                    <div><small>Role keywords</small><strong>{settings.discovery_criteria_suggestion.target_role_keywords.length}</strong></div>
+                    <div><small>Experience limit</small><strong>{settings.discovery_criteria_suggestion.max_required_years} year</strong></div>
+                  </div>
+                  {settings.discovery_criteria_suggestion.detected_skills.length ? <p className="criteria-skills">Detected evidence: {settings.discovery_criteria_suggestion.detected_skills.join(", ")}</p> : null}
+                  <details><summary>Preview proposed searches and keywords</summary><p><strong>Searches:</strong> {settings.discovery_criteria_suggestion.search_queries.join("; ")}</p><p><strong>Role keywords:</strong> {settings.discovery_criteria_suggestion.target_role_keywords.join(", ")}</p></details>
+                  <div className="criteria-proposal-actions"><button type="button" className="secondary-button" onClick={() => reviewCriteriaSuggestion("rejected")} disabled={discoveryBusy}>Keep current criteria</button><button type="button" className="primary-button compact" onClick={() => reviewCriteriaSuggestion("approved")} disabled={discoveryBusy}>Approve new criteria</button></div>
+                </article> : null}
                 <div className="personal-job-links"><div><strong>Personal job-board searches for {discoveryLocation}</strong><small>These open in your browser and use your existing login. The dashboard never stores your LinkedIn or Indeed password.</small></div><a className="secondary-button" href={linkedInJobSearch} target="_blank" rel="noreferrer">Open LinkedIn ↗</a><a className="secondary-button" href={indeedJobSearch} target="_blank" rel="noreferrer">Open Indeed ↗</a></div>
                 <label><span>Optional direct Greenhouse or Lever feeds</span><textarea rows={5} value={discoverySources} onChange={(event) => setDiscoverySources(event.target.value)} placeholder={"https://boards.greenhouse.io/company\nhttps://jobs.lever.co/company"} /><small>These reliable feeds supplement the provider pool. Workday and other career systems are discovered automatically, so they do not need to be listed here.</small></label>
                 <div className="discovery-actions"><button className="secondary-button" type="submit" disabled={discoveryBusy}>{discoveryBusy ? "Saving..." : "Save discovery settings"}</button><button className="primary-button compact" type="button" onClick={fetchJobsNow} disabled={discoveryBusy || (!normalizedDiscoverySources().length && !webSearchConfigured)}>{discoveryBusy ? "Fetching..." : "Fetch now"}</button></div>

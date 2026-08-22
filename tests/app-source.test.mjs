@@ -11,6 +11,8 @@ const sourceMigration = await readFile(new URL("../supabase/migrations/202608190
 const webDiscoveryMigration = await readFile(new URL("../supabase/migrations/20260822205618_broaden_job_discovery_and_decisions.sql", import.meta.url), "utf8");
 const tavilyMigration = await readFile(new URL("../supabase/migrations/20260823004500_configurable_tavily_job_discovery.sql", import.meta.url), "utf8");
 const providerPoolMigration = await readFile(new URL("../supabase/migrations/20260823020000_multi_provider_search_failover.sql", import.meta.url), "utf8");
+const resumeCriteriaMigration = await readFile(new URL("../supabase/migrations/20260823030000_resume_library_and_scout_criteria.sql", import.meta.url), "utf8");
+const resumeCriteriaRoute = await readFile(new URL("../app/api/resume-criteria/route.ts", import.meta.url), "utf8");
 
 function luminance(hex) {
   const channels = hex.match(/[a-f\d]{2}/gi).map((value) => Number.parseInt(value, 16) / 255);
@@ -136,6 +138,24 @@ test("supports accept, applied, and reject decisions with filters", () => {
   assert.match(pageSource, /Open LinkedIn/);
   assert.match(pageSource, /Open Indeed/);
   assert.match(globalStyles, /\.decision-actions\{/);
+});
+
+test("keeps multiple private resume formats and requires criteria approval", () => {
+  assert.match(pageSource, /resume_files\(\*\)/);
+  assert.match(pageSource, /multiple accept="\.docx,\.pdf/);
+  assert.match(pageSource, /A criteria proposal will be prepared for review/);
+  assert.match(pageSource, /Approve new criteria/);
+  assert.match(pageSource, /Keep current criteria/);
+  assert.match(pageSource, /discovery_criteria_suggestion_status: "pending"/);
+  assert.match(pageSource, /discovery_target_role_keywords/);
+  assert.match(discoverySource, /containsConfiguredKeyword/);
+  assert.match(discoverySource, /discovery_excluded_title_keywords/);
+  assert.match(resumeCriteriaMigration, /create table if not exists public\.resume_files/);
+  assert.match(resumeCriteriaMigration, /resume_files_admin_all/);
+  assert.match(resumeCriteriaMigration, /discovery_criteria_suggestion_status/);
+  assert.match(resumeCriteriaRoute, /mammoth\.extractRawText/);
+  assert.match(resumeCriteriaRoute, /extractText\(new Uint8Array/);
+  assert.match(resumeCriteriaRoute, /Nothing changes until you approve/);
 });
 
 test("persists the dashboard scout toggle and visibly pauses its radar", () => {

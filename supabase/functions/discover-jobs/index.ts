@@ -29,6 +29,8 @@ type DiscoverySettings = {
   discovery_web_search_enabled: boolean;
   discovery_web_search_configured: boolean;
   discovery_search_queries: string[];
+  discovery_target_role_keywords: string[];
+  discovery_excluded_title_keywords: string[];
   discovery_max_required_years: number;
   discovery_location: string;
   discovery_country: string;
@@ -554,11 +556,28 @@ function isTargetLocation(candidate: Candidate, targetLocation: string, targetCo
   return terms.some((term) => locationText.includes(term));
 }
 
-function assessEligibility(candidate: Candidate, maxRequiredYears: number, targetLocation: string, targetCountry: string) {
+function containsConfiguredKeyword(value: string, keyword: string) {
+  const normalized = keyword.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.length <= 3) {
+    const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\b${escaped}\\b`, "i").test(value);
+  }
+  return value.includes(normalized);
+}
+
+function assessEligibility(
+  candidate: Candidate,
+  maxRequiredYears: number,
+  targetLocation: string,
+  targetCountry: string,
+  targetRoleKeywords: string[],
+  excludedTitleKeywords: string[],
+) {
   const title = candidate.position.toLowerCase();
   const text = `${candidate.position} ${candidate.location} ${candidate.description}`.toLowerCase();
-  const seniorTitle = /\b(senior|sr\.?|staff|principal|lead|leader|manager|head|director|vice president|vp|architect|expert)\b/.test(title);
-  const targetRole = /(software|application|web|backend|front.?end|full.?stack|mobile|android|ios|java|python|developer|out.?systems|power.?platform|service.?now|ui.?path|artificial intelligence|\bai\b|machine learning|data engineer|data scientist|research engineer|quality analyst|technology analyst|qa engineer|test automation|security|cyber|soc|vulnerab|penetration test|grc|information security|it support|help.?desk|service desk|desktop support|technical support|network engineer|database administrator|systems? administrator|cloud engineer|devops|site reliability)/.test(title);
+  const seniorTitle = excludedTitleKeywords.some((keyword) => containsConfiguredKeyword(title, keyword));
+  const targetRole = targetRoleKeywords.some((keyword) => containsConfiguredKeyword(title, keyword));
   const mandatoryMandarin = /mandarin.{0,35}(required|mandatory|must|essential)/.test(text)
     || /(required|mandatory|must|essential).{0,35}mandarin/.test(text)
     || /chinese language.{0,35}(required|mandatory|must)/.test(text);
@@ -633,7 +652,7 @@ Deno.serve(async (request: Request) => {
 
   const { data: settingsData, error: settingsError } = await service
     .from("app_settings")
-    .select("discovery_enabled, discovery_time, discovery_timezone, discovery_source_urls, discovery_web_search_enabled, discovery_web_search_configured, discovery_search_queries, discovery_max_required_years, discovery_location, discovery_country, discovery_web_search_provider, discovery_provider_order, discovery_monthly_credit_cap, last_scheduled_discovery_date")
+    .select("discovery_enabled, discovery_time, discovery_timezone, discovery_source_urls, discovery_web_search_enabled, discovery_web_search_configured, discovery_search_queries, discovery_target_role_keywords, discovery_excluded_title_keywords, discovery_max_required_years, discovery_location, discovery_country, discovery_web_search_provider, discovery_provider_order, discovery_monthly_credit_cap, last_scheduled_discovery_date")
     .eq("id", 1)
     .single();
   if (settingsError) return json(request, { error: settingsError.message }, 500);
@@ -758,7 +777,14 @@ Deno.serve(async (request: Request) => {
   const uniqueCandidates = [...new Map(allCandidates.map((candidate) => [canonicalUrl(candidate.jobUrl), candidate])).values()];
   const assessments = uniqueCandidates.map((candidate) => ({
     candidate,
-    assessment: assessEligibility(candidate, settings.discovery_max_required_years ?? 1, targetLocation, targetCountry),
+    assessment: assessEligibility(
+      candidate,
+      settings.discovery_max_required_years ?? 1,
+      targetLocation,
+      targetCountry,
+      settings.discovery_target_role_keywords ?? [],
+      settings.discovery_excluded_title_keywords ?? [],
+    ),
   }));
   const eligible = assessments.filter(({ assessment }) => assessment.eligible).map(({ candidate }) => candidate);
   const skippedByReason = assessments.filter(({ assessment }) => !assessment.eligible).reduce<Record<string, number>>((counts, { assessment }) => {
