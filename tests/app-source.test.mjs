@@ -9,6 +9,7 @@ const layoutSource = await readFile(new URL("../app/layout.tsx", import.meta.url
 const discoverySource = await readFile(new URL("../supabase/functions/discover-jobs/index.ts", import.meta.url), "utf8");
 const sourceMigration = await readFile(new URL("../supabase/migrations/202608190011_expand_singapore_discovery_sources.sql", import.meta.url), "utf8");
 const webDiscoveryMigration = await readFile(new URL("../supabase/migrations/20260822205618_broaden_job_discovery_and_decisions.sql", import.meta.url), "utf8");
+const tavilyMigration = await readFile(new URL("../supabase/migrations/20260823004500_configurable_tavily_job_discovery.sql", import.meta.url), "utf8");
 
 function luminance(hex) {
   const channels = hex.match(/[a-f\d]{2}/gi).map((value) => Number.parseInt(value, 16) / 255);
@@ -79,7 +80,12 @@ test("expands supported Singapore company career sources efficiently", () => {
 });
 
 test("combines web-wide discovery with strict fresh-graduate filtering", () => {
-  assert.match(discoverySource, /api\.search\.brave\.com\/res\/v1\/web\/search/);
+  assert.match(discoverySource, /api\.tavily\.com\/search/);
+  assert.match(discoverySource, /api\.tavily\.com\/extract/);
+  assert.match(discoverySource, /api\.tavily\.com\/usage/);
+  assert.match(discoverySource, /Workday Ashby SmartRecruiters Workable iCIMS Oracle/);
+  assert.match(discoverySource, /discovery_monthly_credit_cap/);
+  assert.match(discoverySource, /safety limit reached/);
   assert.match(discoverySource, /function assessEligibility/);
   assert.match(discoverySource, /function requiredExperienceYears/);
   assert.match(discoverySource, /outside target roles/);
@@ -88,6 +94,13 @@ test("combines web-wide discovery with strict fresh-graduate filtering", () => {
   assert.match(webDiscoveryMigration, /discovery_web_search_enabled/);
   assert.match(webDiscoveryMigration, /store_web_search_key_internal/);
   assert.match(webDiscoveryMigration, /job_web_search_key/);
+  assert.match(tavilyMigration, /discovery_location/);
+  assert.match(tavilyMigration, /discovery_country/);
+  assert.match(tavilyMigration, /discovery_web_search_provider = 'tavily'/);
+  assert.match(tavilyMigration, /tvly-/);
+  assert.match(pageSource, /Target country/);
+  assert.match(pageSource, /City, region, or country/);
+  assert.match(pageSource, /Tavily API key/);
 });
 
 test("supports accept, applied, and reject decisions with filters", () => {
