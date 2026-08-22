@@ -24,6 +24,10 @@ update public.app_settings
 set discovery_tavily_configured = discovery_web_search_configured,
     discovery_web_search_provider = 'automatic',
     discovery_provider_order = array['tavily', 'exa', 'firecrawl', 'brave', 'serpapi', 'serper']::text[],
+    discovery_message = case
+      when discovery_web_search_configured then 'Automatic search-provider failover is configured.'
+      else 'Add one or more provider API keys to enable automatic web-search failover.'
+    end,
     updated_at = now()
 where id = 1;
 
