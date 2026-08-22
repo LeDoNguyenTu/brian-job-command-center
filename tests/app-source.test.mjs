@@ -8,6 +8,7 @@ const globalStyles = await readFile(new URL("../app/globals.css", import.meta.ur
 const layoutSource = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
 const discoverySource = await readFile(new URL("../supabase/functions/discover-jobs/index.ts", import.meta.url), "utf8");
 const sourceMigration = await readFile(new URL("../supabase/migrations/202608190011_expand_singapore_discovery_sources.sql", import.meta.url), "utf8");
+const webDiscoveryMigration = await readFile(new URL("../supabase/migrations/20260822205618_broaden_job_discovery_and_decisions.sql", import.meta.url), "utf8");
 
 function luminance(hex) {
   const channels = hex.match(/[a-f\d]{2}/gi).map((value) => Number.parseInt(value, 16) / 255);
@@ -75,6 +76,32 @@ test("expands supported Singapore company career sources efficiently", () => {
   assert.match(sourceMigration, /jobs\.lever\.co\/sonarsource/);
   assert.match(sourceMigration, /jobs\.lever\.co\/ninjavan/);
   assert.match(discoverySource, /Promise\.all\(parsedSources\.map/);
+});
+
+test("combines web-wide discovery with strict fresh-graduate filtering", () => {
+  assert.match(discoverySource, /api\.search\.brave\.com\/res\/v1\/web\/search/);
+  assert.match(discoverySource, /function assessEligibility/);
+  assert.match(discoverySource, /function requiredExperienceYears/);
+  assert.match(discoverySource, /outside target roles/);
+  assert.match(discoverySource, /discovery_max_required_years/);
+  assert.match(discoverySource, /isIndividualJobResult/);
+  assert.match(webDiscoveryMigration, /discovery_web_search_enabled/);
+  assert.match(webDiscoveryMigration, /store_web_search_key_internal/);
+  assert.match(webDiscoveryMigration, /job_web_search_key/);
+});
+
+test("supports accept, applied, and reject decisions with filters", () => {
+  assert.match(pageSource, /const setJobDecision = async/);
+  assert.match(pageSource, /pipeline: decision/);
+  assert.match(pageSource, /Decision/);
+  assert.match(pageSource, /All statuses/);
+  assert.match(pageSource, /✓ Accept/);
+  assert.match(pageSource, /↗ Applied/);
+  assert.match(pageSource, /× Reject/);
+  assert.match(pageSource, /store_web_search_key/);
+  assert.match(pageSource, /Open LinkedIn/);
+  assert.match(pageSource, /Open Indeed/);
+  assert.match(globalStyles, /\.decision-actions\{/);
 });
 
 test("persists the dashboard scout toggle and visibly pauses its radar", () => {
