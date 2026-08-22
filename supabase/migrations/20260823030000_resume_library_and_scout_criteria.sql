@@ -59,5 +59,8 @@ alter table public.app_settings drop constraint if exists app_settings_discovery
 alter table public.app_settings add constraint app_settings_discovery_criteria_suggestion_status_check
 check (discovery_criteria_suggestion_status in ('none', 'pending', 'approved', 'rejected'));
 
+create index if not exists app_settings_discovery_criteria_suggestion_source_resume_idx
+on public.app_settings (discovery_criteria_suggestion_source_resume);
+
 comment on column public.app_settings.discovery_criteria_suggestion is
   'A resume-derived proposal. The scanner continues using active columns until the administrator explicitly approves it.';
