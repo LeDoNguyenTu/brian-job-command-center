@@ -10,10 +10,14 @@ const MOM_S_PASS =
   "https://www.mom.gov.sg/passes-and-permits/s-pass/eligibility";
 const JOBS_PER_PAGE = 10;
 const DEFAULT_DISCOVERY_QUERIES = [
-  "graduate junior entry level software developer engineer",
-  "graduate junior entry level cybersecurity SOC analyst",
-  "graduate junior entry level IT support helpdesk",
-  "graduate junior entry level cloud network infrastructure",
+  "graduate junior entry level software developer software engineer",
+  "graduate junior frontend backend full stack developer",
+  "graduate junior AI machine learning applied AI engineer",
+  "graduate junior cybersecurity SOC information security analyst",
+  "graduate junior application security penetration testing vulnerability analyst",
+  "graduate junior data engineer data platform SQL PostgreSQL",
+  "graduate junior cloud infrastructure platform devops engineer",
+  "graduate junior IT support helpdesk service desk network support",
 ];
 const DISCOVERY_COUNTRIES = [
   ["singapore", "Singapore"], ["malaysia", "Malaysia"], ["vietnam", "Vietnam"],

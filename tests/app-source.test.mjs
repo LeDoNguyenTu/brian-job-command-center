@@ -132,6 +132,11 @@ test("combines web-wide discovery with strict fresh-graduate filtering", () => {
   assert.match(pageSource, /SerpApi key/);
   assert.match(pageSource, /Serper API key/);
   assert.match(pageSource, /store_search_provider_keys/);
+  assert.match(pageSource, /graduate junior IT support helpdesk service desk network support/);
+  assert.match(resumeCriteriaRoute, /"software engineer", "software engineering intern"/);
+  assert.match(resumeCriteriaRoute, /"soc analyst", "soc engineer", "security analyst"/);
+  assert.match(resumeCriteriaRoute, /"security compliance", "security governance"/);
+  assert.doesNotMatch(resumeCriteriaRoute, /keywords: \["software", "application", "web"/);
 });
 
 test("supports accept, applied, and reject decisions with filters", () => {

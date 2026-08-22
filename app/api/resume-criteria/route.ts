@@ -11,32 +11,63 @@ const DEFAULT_EXCLUDED_TITLES = [
 const ROLE_GROUPS = [
   {
     signals: ["typescript", "javascript", "react", "next.js", "node.js", "fastapi", "software developer", "full-stack", "backend", "frontend"],
-    keywords: ["software", "application", "web", "backend", "frontend", "full stack", "developer", "engineer", "typescript", "javascript", "python", "react", "next.js", "node.js", "fastapi"],
-    queries: ["graduate junior entry level software developer engineer", "graduate junior full stack backend developer"],
+    keywords: [
+      "software developer", "software engineer", "software engineering intern", "software developer intern", "graduate software engineer",
+      "graduate developer", "associate software engineer", "junior software developer", "junior software engineer", "application developer",
+      "web developer", "frontend developer", "front-end developer", "frontend engineer", "front-end engineer", "backend developer",
+      "back-end developer", "backend engineer", "back-end engineer", "full stack developer", "full-stack developer", "full stack engineer",
+      "full-stack engineer", "developer analyst", "programmer analyst",
+    ],
+    queries: [
+      "graduate junior entry level software developer software engineer",
+      "graduate junior frontend backend full stack developer",
+    ],
     label: "software engineering",
   },
   {
     signals: ["ai/ml", "machine learning", "pytorch", "cnn", "llm", "ocr", "artificial intelligence"],
-    keywords: ["artificial intelligence", "ai", "machine learning", "ml engineer", "data scientist", "research engineer", "pytorch", "llm", "ocr"],
-    queries: ["graduate junior entry level AI machine learning engineer", "graduate junior applied AI developer"],
+    keywords: [
+      "ai engineer", "artificial intelligence engineer", "machine learning engineer", "ml engineer", "applied ai engineer", "ai developer",
+      "machine learning developer", "ai intern", "machine learning intern", "ai algorithm engineer", "ai algorithms engineer", "ai research engineer",
+    ],
+    queries: ["graduate junior AI machine learning applied AI engineer"],
     label: "AI and machine learning",
   },
   {
     signals: ["cybersecurity", "security", "vulnerability", "oauth 2.0", "static analysis"],
-    keywords: ["security", "cyber", "soc", "vulnerability", "penetration test", "grc", "information security", "application security"],
-    queries: ["graduate junior entry level cybersecurity SOC analyst", "graduate junior application security engineer"],
+    keywords: [
+      "soc analyst", "soc engineer", "security analyst", "cybersecurity analyst", "cyber security analyst", "information security analyst",
+      "application security engineer", "application security analyst", "security engineer", "security consultant", "cybersecurity consultant",
+      "cyber security consultant", "security compliance", "security governance", "penetration tester", "penetration testing consultant",
+      "security testing engineer", "vulnerability analyst", "grc analyst",
+    ],
+    queries: [
+      "graduate junior cybersecurity SOC information security analyst",
+      "graduate junior application security penetration testing vulnerability analyst",
+    ],
     label: "cybersecurity",
   },
   {
     signals: ["postgresql", "supabase", "duckdb", "parquet", "data-intensive", "sql"],
-    keywords: ["data engineer", "data analyst", "database", "sql", "postgresql", "platform engineer"],
-    queries: ["graduate junior data platform engineer SQL PostgreSQL"],
+    keywords: [
+      "data engineer", "data platform engineer", "analytics engineer", "database developer", "database administrator", "sql developer",
+      "data analyst", "business intelligence analyst",
+    ],
+    queries: ["graduate junior data engineer data platform SQL PostgreSQL"],
     label: "data and platform engineering",
   },
   {
     signals: ["cloud", "vercel", "supabase edge functions", "ci/cd", "devops"],
-    keywords: ["cloud engineer", "devops", "site reliability", "infrastructure", "systems administrator", "network engineer"],
-    queries: ["graduate junior cloud platform devops engineer"],
+    keywords: [
+      "cloud engineer", "cloud support engineer", "platform engineer", "devops engineer", "site reliability engineer", "infrastructure engineer",
+      "systems engineer", "network engineer", "it support engineer", "it support specialist", "helpdesk analyst", "help desk analyst",
+      "service desk analyst", "desktop support engineer", "technical support engineer", "network support engineer", "system administrator",
+      "systems administrator",
+    ],
+    queries: [
+      "graduate junior cloud infrastructure platform devops engineer",
+      "graduate junior IT support helpdesk service desk network support",
+    ],
     label: "cloud and platform",
   },
 ];
