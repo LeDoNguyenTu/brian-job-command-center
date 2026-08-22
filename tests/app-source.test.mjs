@@ -42,6 +42,9 @@ test("limits the job list and provides date sorting", () => {
   assert.match(pageSource, /second\.score - first\.score/);
   assert.match(pageSource, /highest match first/);
   assert.match(pageSource, /Load more jobs/);
+  assert.match(globalStyles, /\.pipeline-tools\{width:100%;grid-template-columns:minmax\(0,1fr\)\}/);
+  assert.match(globalStyles, /\.date-sort select\{width:100%;height:42px/);
+  assert.match(globalStyles, /\.filter-tabs\{display:grid;width:100%;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
 });
 
 test("keeps job titles clear and provides accessible score and text controls", () => {
@@ -55,6 +58,10 @@ test("keeps job titles clear and provides accessible score and text controls", (
   assert.match(pageSource, /text-size-\$\{textSize\}/);
   assert.match(globalStyles, /\.app-shell select option\{background:#151824;color:#f5f7ff\}/);
   assert.match(globalStyles, /\.app-shell\.light select option\{background:#fff;color:#1b1d29\}/);
+  assert.match(globalStyles, /Responsive containment shared by every dashboard section and modal/);
+  assert.match(globalStyles, /\.app-shell :where\(input,select,textarea,button\)\{max-width:100%\}/);
+  assert.match(globalStyles, /\.welcome-section h1\{font-size:clamp\(30px,9vw,34px\)\}/);
+  assert.match(globalStyles, /\.scout-actions,\.salary-actions,\.modal-actions,\.document-actions,\.provider-actions\{grid-template-columns:minmax\(0,1fr\)\}/);
 });
 
 test("keeps Cloudflare verification visible on narrow screens", () => {
@@ -89,6 +96,7 @@ test("combines web-wide discovery with strict fresh-graduate filtering", () => {
   assert.match(discoverySource, /api\.exa\.ai\/search/);
   assert.match(discoverySource, /api\.firecrawl\.dev\/v2\/search/);
   assert.match(discoverySource, /api\.search\.brave\.com\/res\/v1\/web\/search/);
+  assert.match(discoverySource, /return supported\.has\(code\) \? code : "ALL"/);
   assert.match(discoverySource, /serpapi\.com\/search\.json/);
   assert.match(discoverySource, /google\.serper\.dev\/search/);
   assert.match(discoverySource, /DEFAULT_PROVIDER_ORDER/);
@@ -156,6 +164,19 @@ test("keeps multiple private resume formats and requires criteria approval", () 
   assert.match(resumeCriteriaRoute, /mammoth\.extractRawText/);
   assert.match(resumeCriteriaRoute, /extractText\(new Uint8Array/);
   assert.match(resumeCriteriaRoute, /Nothing changes until you approve/);
+  assert.match(globalStyles, /\.criteria-proposal-heading>span\{[^}]*align-items:center/);
+  assert.match(globalStyles, /\.criteria-proposal-heading>span\{[^}]*justify-content:center/);
+  assert.match(globalStyles, /\.criteria-proposal-actions button\{min-height:40px\}/);
+});
+
+test("tests every configured search provider without inserting jobs", () => {
+  assert.match(pageSource, /const testSearchProviders = async/);
+  assert.match(pageSource, /action: "diagnostic"/);
+  assert.match(pageSource, /Test saved keys/);
+  assert.match(pageSource, /provider-health-grid/);
+  assert.match(discoverySource, /action === "diagnostic"/);
+  assert.match(discoverySource, /Key accepted and test search completed/);
+  assert.match(discoverySource, /for \(const provider of DEFAULT_PROVIDER_ORDER\)/);
 });
 
 test("persists the dashboard scout toggle and visibly pauses its radar", () => {

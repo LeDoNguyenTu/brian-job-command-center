@@ -288,6 +288,16 @@ const countryCode = (country: string) => ({
   australia: "au",
 }[country.toLowerCase()] ?? country.toLowerCase().slice(0, 2));
 
+const braveCountryCode = (country: string) => {
+  const code = countryCode(country).toUpperCase();
+  const supported = new Set([
+    "AR", "AU", "AT", "BE", "BR", "CA", "CL", "DK", "FI", "FR", "DE", "HK", "IN", "ID",
+    "IT", "JP", "KR", "MY", "MX", "NL", "NZ", "NO", "CN", "PL", "PT", "PH", "RU", "SA",
+    "ZA", "ES", "SE", "CH", "TW", "TR", "GB", "US",
+  ]);
+  return supported.has(code) ? code : "ALL";
+};
+
 async function fetchTavilySearch(query: string, apiKey: string, location: string, country: string): Promise<WebResult[]> {
   const response = await fetch("https://api.tavily.com/search", {
     method: "POST",
@@ -313,7 +323,7 @@ async function fetchBraveSearch(query: string, apiKey: string, location: string,
   const params = new URLSearchParams({
     q: fullJobQuery(query, location),
     count: "20",
-    country: countryCode(country).toUpperCase(),
+    country: braveCountryCode(country),
     search_lang: "en",
     freshness: "pw",
     safesearch: "moderate",
@@ -630,9 +640,15 @@ Deno.serve(async (request: Request) => {
   const service = createClient(url, serviceKey, { auth: { persistSession: false } });
   let body: { action?: string } = {};
   try { body = await request.json(); } catch { return json(request, { error: "Invalid JSON body" }, 400); }
-  const action = body.action === "scheduled" ? "scheduled" : body.action === "maintenance" ? "maintenance" : "manual";
+  const action = body.action === "scheduled"
+    ? "scheduled"
+    : body.action === "maintenance"
+      ? "maintenance"
+      : body.action === "diagnostic"
+        ? "diagnostic"
+        : "manual";
 
-  if (action === "scheduled" || action === "maintenance") {
+  if (action === "scheduled" || action === "maintenance" || (action === "diagnostic" && request.headers.has("x-cron-secret"))) {
     const { data: expected, error } = await service.rpc("read_job_discovery_cron_secret_for_service");
     if (error || !expected || request.headers.get("x-cron-secret") !== expected) return json(request, { error: "Unauthorized" }, 401);
   } else {
@@ -667,6 +683,42 @@ Deno.serve(async (request: Request) => {
   }
   const configuredProviders = (settings.discovery_provider_order?.length ? settings.discovery_provider_order : DEFAULT_PROVIDER_ORDER)
     .filter((provider, index, order) => DEFAULT_PROVIDER_ORDER.includes(provider) && order.indexOf(provider) === index && Boolean(providerKeys[provider]));
+
+  if (action === "diagnostic") {
+    const targetLocation = settings.discovery_location?.trim() || "Singapore";
+    const targetCountry = settings.discovery_country?.trim().toLowerCase() || "singapore";
+    const diagnosticQuery = settings.discovery_search_queries?.[0] || "graduate junior software engineer";
+    const diagnostics: ProviderAttempt[] = [];
+    for (const provider of DEFAULT_PROVIDER_ORDER) {
+      const apiKey = providerKeys[provider];
+      if (!apiKey) {
+        diagnostics.push({ provider, status: "skipped", reason: "No saved key", results: 0 });
+        continue;
+      }
+      try {
+        if (provider === "tavily") await fetchTavilyUsage(apiKey);
+        const results = await searchProvider(provider, diagnosticQuery, apiKey, targetLocation, targetCountry);
+        diagnostics.push({ provider, status: "used", reason: "Key accepted and test search completed", results: results.length });
+      } catch (error) {
+        diagnostics.push({
+          provider,
+          status: "failed",
+          reason: error instanceof Error ? error.message : "Provider test failed",
+          results: 0,
+        });
+      }
+    }
+    await service.from("app_settings").update({
+      discovery_provider_status: diagnostics,
+      updated_at: new Date().toISOString(),
+    }).eq("id", 1);
+    return json(request, {
+      diagnostics,
+      working: diagnostics.filter((item) => item.status === "used").length,
+      configured: diagnostics.filter((item) => item.status !== "skipped").length,
+    });
+  }
+
   if (!settings.discovery_source_urls?.length && !configuredProviders.length) {
     await service.from("app_settings").update({
       discovery_status: "Waiting for sources",
