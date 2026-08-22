@@ -70,7 +70,15 @@ type AppSettings = {
   discovery_max_required_years?: number;
   discovery_location?: string;
   discovery_country?: string;
-  discovery_web_search_provider?: "tavily";
+  discovery_web_search_provider?: "automatic" | "tavily" | "exa" | "firecrawl" | "brave" | "serpapi" | "serper";
+  discovery_tavily_configured?: boolean;
+  discovery_exa_configured?: boolean;
+  discovery_firecrawl_configured?: boolean;
+  discovery_brave_configured?: boolean;
+  discovery_serpapi_configured?: boolean;
+  discovery_serper_configured?: boolean;
+  discovery_last_provider?: string | null;
+  discovery_provider_status?: Array<{ provider: string; status: string; reason: string; results: number }>;
   discovery_monthly_credit_cap?: number;
   discovery_last_credit_usage?: number | null;
   discovery_last_credit_limit?: number | null;
@@ -673,6 +681,11 @@ export default function Home() {
   const [webSearchConfigured, setWebSearchConfigured] = useState(false);
   const [webSearchQueries, setWebSearchQueries] = useState(DEFAULT_DISCOVERY_QUERIES.join("\n"));
   const [webSearchKey, setWebSearchKey] = useState("");
+  const [exaSearchKey, setExaSearchKey] = useState("");
+  const [firecrawlSearchKey, setFirecrawlSearchKey] = useState("");
+  const [braveSearchKey, setBraveSearchKey] = useState("");
+  const [serpApiSearchKey, setSerpApiSearchKey] = useState("");
+  const [serperSearchKey, setSerperSearchKey] = useState("");
   const [maxRequiredYears, setMaxRequiredYears] = useState(1);
   const [discoveryLocation, setDiscoveryLocation] = useState("Singapore");
   const [discoveryCountry, setDiscoveryCountry] = useState("singapore");
@@ -1179,7 +1192,7 @@ export default function Home() {
       discovery_max_required_years: maxRequiredYears,
       discovery_location: discoveryLocation.trim(),
       discovery_country: discoveryCountry,
-      discovery_web_search_provider: "tavily",
+      discovery_web_search_provider: "automatic",
       discovery_monthly_credit_cap: 900,
       discovery_status: stateCopy.status,
       discovery_message: stateCopy.message,
@@ -1193,20 +1206,52 @@ export default function Home() {
   };
 
   const saveWebSearchKey = async () => {
-    if (!/^tvly-[A-Za-z0-9_-]{16,}$/.test(webSearchKey.trim())) {
+    const keys = {
+      tavily: webSearchKey.trim(),
+      exa: exaSearchKey.trim(),
+      firecrawl: firecrawlSearchKey.trim(),
+      brave: braveSearchKey.trim(),
+      serpapi: serpApiSearchKey.trim(),
+      serper: serperSearchKey.trim(),
+    };
+    if (!Object.values(keys).some(Boolean)) {
+      setDiscoveryMessage("Paste at least one new or replacement provider key.");
+      return;
+    }
+    if (keys.tavily && !/^tvly-[A-Za-z0-9_-]{16,}$/.test(keys.tavily)) {
       setDiscoveryMessage("Enter a valid Tavily API key beginning with tvly-.");
+      return;
+    }
+    if (keys.firecrawl && !/^fc-[A-Za-z0-9_-]{12,}$/.test(keys.firecrawl)) {
+      setDiscoveryMessage("Enter a valid Firecrawl API key beginning with fc-.");
+      return;
+    }
+    if ([keys.exa, keys.serpapi, keys.serper].some((key) => key && key.length < 16) || keys.brave && keys.brave.length < 20) {
+      setDiscoveryMessage("One of the provider keys is too short. Copy the complete key from its provider dashboard.");
       return;
     }
     setDiscoveryBusy(true);
     setDiscoveryMessage("");
-    const { error } = await supabase.rpc("store_web_search_key", { key_value: webSearchKey.trim() });
+    const { error } = await supabase.rpc("store_search_provider_keys", {
+      tavily_key: keys.tavily || null,
+      exa_key: keys.exa || null,
+      firecrawl_key: keys.firecrawl || null,
+      brave_key: keys.brave || null,
+      serpapi_key: keys.serpapi || null,
+      serper_key: keys.serper || null,
+    });
     if (error) {
       setDiscoveryMessage(error.message);
     } else {
       setWebSearchKey("");
+      setExaSearchKey("");
+      setFirecrawlSearchKey("");
+      setBraveSearchKey("");
+      setSerpApiSearchKey("");
+      setSerperSearchKey("");
       setWebSearchConfigured(true);
       setWebSearchEnabled(true);
-      setDiscoveryMessage("Tavily search and page-extraction key saved securely in Supabase Vault.");
+      setDiscoveryMessage("Provider keys saved securely. Automatic failover will use the first available service on every scan.");
       await loadDashboard();
     }
     setDiscoveryBusy(false);
@@ -1237,7 +1282,9 @@ export default function Home() {
       setDiscoveryMessage(data.reason || "The scan was skipped.");
     } else {
       const usage = data?.tavilyUsage ? ` Tavily used ${data.tavilyUsage.usage} of ${Math.min(data.tavilyUsage.limit, 900)} allowed monthly credits.` : "";
-      setDiscoveryMessage(`${data?.inserted ?? 0} new roles added for ${data?.targetLocation || discoveryLocation}. ${data?.duplicates ?? 0} already tracked. ${data?.skipped ?? 0} unsuitable roles skipped.${usage}`);
+      const provider = data?.webSearchProvider ? ` Web search used ${String(data.webSearchProvider).replace(/^./, (letter: string) => letter.toUpperCase())}.` : "";
+      const fallback = Array.isArray(data?.providerAttempts) && data.providerAttempts.length > 1 ? ` Automatic failover skipped ${data.providerAttempts.length - 1} unavailable provider${data.providerAttempts.length === 2 ? "" : "s"}.` : "";
+      setDiscoveryMessage(`${data?.inserted ?? 0} new roles added for ${data?.targetLocation || discoveryLocation}. ${data?.duplicates ?? 0} already tracked. ${data?.skipped ?? 0} unsuitable roles skipped.${provider}${fallback}${usage}`);
       await loadDashboard();
     }
     setDiscoveryBusy(false);
@@ -1942,7 +1989,7 @@ export default function Home() {
 
             <section className="security-panel discovery-panel">
               <div className="security-heading"><div><p>Job discovery</p><h3>Location, schedule, and web coverage</h3></div><span className={discoveryEnabled && (normalizedDiscoverySources().length || webSearchConfigured) ? "connection-status connected" : "connection-status"}>{discoveryEnabled ? normalizedDiscoverySources().length || webSearchConfigured ? "Scheduled" : "Setup needed" : "Paused"}</span></div>
-              <p className="security-copy">The scout combines direct company feeds with Tavily search and page extraction across Workday, Ashby, SmartRecruiters, Workable, iCIMS, Oracle Recruiting, job boards, and independent company career sites. Repeated runs update known listings without creating duplicates.</p>
+              <p className="security-copy">The scout combines direct company feeds with an automatic provider pool covering Tavily, Exa, Firecrawl, Brave Search, SerpApi, and Serper. Every manual or scheduled scan tries providers in that order and switches automatically when one is out of credits, rate-limited, or unavailable.</p>
               <form className="discovery-form" onSubmit={saveDiscoverySettings}>
                 <label className="checkbox-field discovery-toggle"><input type="checkbox" checked={discoveryEnabled} onChange={(event) => setDiscoveryEnabled(event.target.checked)} /><span>Run automatically each day</span></label>
                 <div className="discovery-schedule-grid">
@@ -1953,18 +2000,27 @@ export default function Home() {
                   <label><span>Daily time</span><input type="time" value={discoveryTime} onChange={(event) => setDiscoveryTime(event.target.value)} required /></label>
                   <label><span>Timezone</span><select value={discoveryTimezone} onChange={(event) => setDiscoveryTimezone(event.target.value)}><option value="Asia/Singapore">Singapore - SGT</option><option value="Asia/Ho_Chi_Minh">Vietnam - ICT</option><option value="Asia/Kuala_Lumpur">Kuala Lumpur - MYT</option><option value="UTC">UTC</option></select></label>
                 </div>
-                <div className="web-search-heading"><label className="checkbox-field discovery-toggle"><input type="checkbox" checked={webSearchEnabled} onChange={(event) => setWebSearchEnabled(event.target.checked)} /><span>Search and extract the wider web</span></label><span className={webSearchConfigured ? "connection-status connected" : "connection-status"}>{webSearchConfigured ? "Tavily secured" : "API key needed"}</span></div>
+                <div className="web-search-heading"><label className="checkbox-field discovery-toggle"><input type="checkbox" checked={webSearchEnabled} onChange={(event) => setWebSearchEnabled(event.target.checked)} /><span>Search and extract the wider web</span></label><span className={webSearchConfigured ? "connection-status connected" : "connection-status"}>{webSearchConfigured ? "Provider pool secured" : "API key needed"}</span></div>
                 <div className="discovery-schedule-grid">
                   <label><span>Maximum required experience</span><select value={maxRequiredYears} onChange={(event) => setMaxRequiredYears(Number(event.target.value))}><option value={0}>No professional experience</option><option value={1}>Up to 1 year</option><option value={2}>Up to 2 years</option></select></label>
-                  <label><span>{webSearchConfigured ? "Replacement Tavily key" : "Tavily API key"}</span><input type="password" value={webSearchKey} onChange={(event) => setWebSearchKey(event.target.value)} autoComplete="off" placeholder={webSearchConfigured ? "Paste only to replace current key" : "tvly-..."} /></label>
+                  <div className="provider-order-note"><strong>Automatic order</strong><small>Tavily → Exa → Firecrawl → Brave → SerpApi → Serper</small></div>
                 </div>
-                <div className="web-key-actions"><p>The free Tavily plan provides 1,000 monthly credits without a card. The scout stops web requests at 900 and keeps a 100-credit buffer. Your key stays encrypted in Supabase Vault.</p><button className="secondary-button" type="button" onClick={saveWebSearchKey} disabled={discoveryBusy || !webSearchKey.trim()}>{webSearchConfigured ? "Replace Tavily key" : "Save Tavily key"}</button></div>
+                <div className="discovery-schedule-grid provider-key-grid">
+                  <label><span>Tavily API key {settings?.discovery_tavily_configured ? "- saved" : ""}</span><input type="password" value={webSearchKey} onChange={(event) => setWebSearchKey(event.target.value)} autoComplete="off" placeholder={settings?.discovery_tavily_configured ? "Paste only to replace" : "tvly-..."} /></label>
+                  <label><span>Exa API key {settings?.discovery_exa_configured ? "- saved" : ""}</span><input type="password" value={exaSearchKey} onChange={(event) => setExaSearchKey(event.target.value)} autoComplete="off" placeholder={settings?.discovery_exa_configured ? "Paste only to replace" : "Exa key"} /></label>
+                  <label><span>Firecrawl API key {settings?.discovery_firecrawl_configured ? "- saved" : ""}</span><input type="password" value={firecrawlSearchKey} onChange={(event) => setFirecrawlSearchKey(event.target.value)} autoComplete="off" placeholder={settings?.discovery_firecrawl_configured ? "Paste only to replace" : "fc-..."} /></label>
+                  <label><span>Brave Search API key {settings?.discovery_brave_configured ? "- saved" : ""}</span><input type="password" value={braveSearchKey} onChange={(event) => setBraveSearchKey(event.target.value)} autoComplete="off" placeholder={settings?.discovery_brave_configured ? "Paste only to replace" : "Brave key"} /></label>
+                  <label><span>SerpApi key {settings?.discovery_serpapi_configured ? "- saved" : ""}</span><input type="password" value={serpApiSearchKey} onChange={(event) => setSerpApiSearchKey(event.target.value)} autoComplete="off" placeholder={settings?.discovery_serpapi_configured ? "Paste only to replace" : "SerpApi key"} /></label>
+                  <label><span>Serper API key {settings?.discovery_serper_configured ? "- saved" : ""}</span><input type="password" value={serperSearchKey} onChange={(event) => setSerperSearchKey(event.target.value)} autoComplete="off" placeholder={settings?.discovery_serper_configured ? "Paste only to replace" : "Serper key"} /></label>
+                </div>
+                <div className="web-key-actions"><p>Paste any or all keys, then save once. Empty fields preserve previously saved keys. Every key is encrypted in Supabase Vault and is never returned to the browser.</p><button className="secondary-button" type="button" onClick={saveWebSearchKey} disabled={discoveryBusy || ![webSearchKey, exaSearchKey, firecrawlSearchKey, braveSearchKey, serpApiSearchKey, serperSearchKey].some((key) => key.trim())}>{webSearchConfigured ? "Save or replace provider keys" : "Save provider keys"}</button></div>
                 <label><span>Target role searches, one per line</span><textarea rows={5} value={webSearchQueries} onChange={(event) => setWebSearchQueries(event.target.value)} /><small>The saved location is added automatically. Two extra searches cover major ATS platforms and independent company career sites.</small></label>
                 <div className="personal-job-links"><div><strong>Personal job-board searches for {discoveryLocation}</strong><small>These open in your browser and use your existing login. The dashboard never stores your LinkedIn or Indeed password.</small></div><a className="secondary-button" href={linkedInJobSearch} target="_blank" rel="noreferrer">Open LinkedIn ↗</a><a className="secondary-button" href={indeedJobSearch} target="_blank" rel="noreferrer">Open Indeed ↗</a></div>
-                <label><span>Optional direct Greenhouse or Lever feeds</span><textarea rows={5} value={discoverySources} onChange={(event) => setDiscoverySources(event.target.value)} placeholder={"https://boards.greenhouse.io/company\nhttps://jobs.lever.co/company"} /><small>These reliable feeds supplement Tavily. Workday and other career systems are discovered automatically, so they do not need to be listed here.</small></label>
+                <label><span>Optional direct Greenhouse or Lever feeds</span><textarea rows={5} value={discoverySources} onChange={(event) => setDiscoverySources(event.target.value)} placeholder={"https://boards.greenhouse.io/company\nhttps://jobs.lever.co/company"} /><small>These reliable feeds supplement the provider pool. Workday and other career systems are discovered automatically, so they do not need to be listed here.</small></label>
                 <div className="discovery-actions"><button className="secondary-button" type="submit" disabled={discoveryBusy}>{discoveryBusy ? "Saving..." : "Save discovery settings"}</button><button className="primary-button compact" type="button" onClick={fetchJobsNow} disabled={discoveryBusy || (!normalizedDiscoverySources().length && !webSearchConfigured)}>{discoveryBusy ? "Fetching..." : "Fetch now"}</button></div>
               </form>
-              {settings?.discovery_last_credit_limit ? <p className="connection-detail">Tavily usage: {settings.discovery_last_credit_usage ?? 0} of {Math.min(settings.discovery_last_credit_limit, settings.discovery_monthly_credit_cap ?? 900)} allowed credits this month. Web discovery pauses automatically before the safety ceiling.</p> : null}
+              {settings?.discovery_last_credit_limit ? <p className="connection-detail">Tavily usage: {settings.discovery_last_credit_usage ?? 0} of {Math.min(settings.discovery_last_credit_limit, settings.discovery_monthly_credit_cap ?? 900)} allowed credits this month. When the safety ceiling is reached, the next configured provider takes over.</p> : null}
+              {settings?.discovery_last_provider ? <p className="connection-detail">Last web provider used: <strong>{settings.discovery_last_provider.replace(/^./, (letter) => letter.toUpperCase())}</strong>.</p> : null}
               <p className="connection-detail">{settings?.last_discovery_at ? `Last run: ${new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short", timeZone: settings.discovery_timezone || "Asia/Singapore" }).format(new Date(settings.last_discovery_at))}. ${settings.discovery_message || ""}` : settings?.discovery_message || "No live discovery run yet. Existing prepared records will remain until you delete them."}</p>
               {discoveryMessage ? <p className="discovery-message" role="status">{discoveryMessage}</p> : null}
             </section>

@@ -10,6 +10,7 @@ const discoverySource = await readFile(new URL("../supabase/functions/discover-j
 const sourceMigration = await readFile(new URL("../supabase/migrations/202608190011_expand_singapore_discovery_sources.sql", import.meta.url), "utf8");
 const webDiscoveryMigration = await readFile(new URL("../supabase/migrations/20260822205618_broaden_job_discovery_and_decisions.sql", import.meta.url), "utf8");
 const tavilyMigration = await readFile(new URL("../supabase/migrations/20260823004500_configurable_tavily_job_discovery.sql", import.meta.url), "utf8");
+const providerPoolMigration = await readFile(new URL("../supabase/migrations/20260823020000_multi_provider_search_failover.sql", import.meta.url), "utf8");
 
 function luminance(hex) {
   const channels = hex.match(/[a-f\d]{2}/gi).map((value) => Number.parseInt(value, 16) / 255);
@@ -83,9 +84,16 @@ test("combines web-wide discovery with strict fresh-graduate filtering", () => {
   assert.match(discoverySource, /api\.tavily\.com\/search/);
   assert.match(discoverySource, /api\.tavily\.com\/extract/);
   assert.match(discoverySource, /api\.tavily\.com\/usage/);
+  assert.match(discoverySource, /api\.exa\.ai\/search/);
+  assert.match(discoverySource, /api\.firecrawl\.dev\/v2\/search/);
+  assert.match(discoverySource, /api\.search\.brave\.com\/res\/v1\/web\/search/);
+  assert.match(discoverySource, /serpapi\.com\/search\.json/);
+  assert.match(discoverySource, /google\.serper\.dev\/search/);
+  assert.match(discoverySource, /DEFAULT_PROVIDER_ORDER/);
+  assert.match(discoverySource, /providerAttempts/);
   assert.match(discoverySource, /Workday Ashby SmartRecruiters Workable iCIMS Oracle/);
   assert.match(discoverySource, /discovery_monthly_credit_cap/);
-  assert.match(discoverySource, /safety limit reached/);
+  assert.match(discoverySource, /Safety cap reached/);
   assert.match(discoverySource, /function assessEligibility/);
   assert.match(discoverySource, /function requiredExperienceYears/);
   assert.match(discoverySource, /outside target roles/);
@@ -98,9 +106,22 @@ test("combines web-wide discovery with strict fresh-graduate filtering", () => {
   assert.match(tavilyMigration, /discovery_country/);
   assert.match(tavilyMigration, /discovery_web_search_provider = 'tavily'/);
   assert.match(tavilyMigration, /tvly-/);
+  assert.match(providerPoolMigration, /store_search_provider_keys/);
+  assert.match(providerPoolMigration, /read_search_provider_keys_for_service/);
+  assert.match(providerPoolMigration, /job_exa_search_key/);
+  assert.match(providerPoolMigration, /job_firecrawl_search_key/);
+  assert.match(providerPoolMigration, /job_brave_search_key/);
+  assert.match(providerPoolMigration, /job_serpapi_search_key/);
+  assert.match(providerPoolMigration, /job_serper_search_key/);
   assert.match(pageSource, /Target country/);
   assert.match(pageSource, /City, region, or country/);
   assert.match(pageSource, /Tavily API key/);
+  assert.match(pageSource, /Exa API key/);
+  assert.match(pageSource, /Firecrawl API key/);
+  assert.match(pageSource, /Brave Search API key/);
+  assert.match(pageSource, /SerpApi key/);
+  assert.match(pageSource, /Serper API key/);
+  assert.match(pageSource, /store_search_provider_keys/);
 });
 
 test("supports accept, applied, and reject decisions with filters", () => {
@@ -111,7 +132,7 @@ test("supports accept, applied, and reject decisions with filters", () => {
   assert.match(pageSource, /✓ Accept/);
   assert.match(pageSource, /↗ Applied/);
   assert.match(pageSource, /× Reject/);
-  assert.match(pageSource, /store_web_search_key/);
+  assert.match(pageSource, /store_search_provider_keys/);
   assert.match(pageSource, /Open LinkedIn/);
   assert.match(pageSource, /Open Indeed/);
   assert.match(globalStyles, /\.decision-actions\{/);

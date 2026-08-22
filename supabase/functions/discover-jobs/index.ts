@@ -32,7 +32,8 @@ type DiscoverySettings = {
   discovery_max_required_years: number;
   discovery_location: string;
   discovery_country: string;
-  discovery_web_search_provider: "tavily";
+  discovery_web_search_provider: "automatic" | SearchProvider;
+  discovery_provider_order: SearchProvider[];
   discovery_monthly_credit_cap: number;
   last_scheduled_discovery_date: string | null;
 };
@@ -68,7 +69,9 @@ type LeverJob = {
   categories?: { location?: string; commitment?: string };
 };
 
-type TavilyResult = {
+type SearchProvider = "tavily" | "exa" | "firecrawl" | "brave" | "serpapi" | "serper";
+
+type WebResult = {
   title?: string;
   url?: string;
   content?: string;
@@ -77,7 +80,7 @@ type TavilyResult = {
 };
 
 type TavilySearchPayload = {
-  results?: TavilyResult[];
+  results?: WebResult[];
 };
 
 type TavilyExtractPayload = {
@@ -88,6 +91,39 @@ type TavilyUsagePayload = {
   key?: { usage?: number; limit?: number };
   account?: { plan_usage?: number; plan_limit?: number; paygo_usage?: number };
 };
+
+type BraveSearchPayload = {
+  web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
+};
+
+type SerperSearchPayload = {
+  organic?: Array<{ title?: string; link?: string; snippet?: string }>;
+};
+
+type ExaSearchPayload = {
+  results?: Array<{ title?: string; url?: string; text?: string; highlights?: string[] }>;
+};
+
+type FirecrawlSearchPayload = {
+  success?: boolean;
+  data?: { web?: Array<{ title?: string; url?: string; description?: string; markdown?: string }> };
+};
+
+type SerpApiSearchPayload = {
+  organic_results?: Array<{ title?: string; link?: string; snippet?: string }>;
+  error?: string;
+};
+
+type ProviderKeys = Partial<Record<SearchProvider, string>>;
+
+type ProviderAttempt = {
+  provider: SearchProvider;
+  status: "used" | "skipped" | "failed";
+  reason: string;
+  results: number;
+};
+
+const DEFAULT_PROVIDER_ORDER: SearchProvider[] = ["tavily", "exa", "firecrawl", "brave", "serpapi", "serper"];
 
 const json = (request: Request, body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: corsHeaders(request) });
@@ -200,7 +236,7 @@ const isIndividualJobResult = (url: URL, title: string) => {
     && /job|career|position|vacan|opening|recruit|apply/.test(`${path} ${title}`.toLowerCase());
 };
 
-function webResultIdentity(result: TavilyResult, location: string) {
+function webResultIdentity(result: WebResult, location: string) {
   const rawTitle = stripHtml(String(result.title ?? "Untitled role"));
   const linkedIn = rawTitle.match(new RegExp(`^(.+?)\\s+hiring\\s+(.+?)\\s+in\\s+${location.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i"));
   if (linkedIn) return { company: linkedIn[1].trim(), position: linkedIn[2].trim() };
@@ -228,12 +264,34 @@ async function fetchTavilyUsage(apiKey: string) {
   };
 }
 
-async function fetchWebSearch(query: string, apiKey: string, location: string, country: string): Promise<TavilyResult[]> {
+const filterJobResults = (results: WebResult[]) => results.filter((result) => {
+  try {
+    const jobUrl = new URL(String(result.url ?? ""));
+    return jobUrl.protocol === "https:" && isIndividualJobResult(jobUrl, String(result.title ?? ""));
+  } catch {
+    return false;
+  }
+});
+
+const fullJobQuery = (query: string, location: string) =>
+  `${query} in ${location} jobs graduate junior entry level associate -senior -staff -principal -lead -manager -director`;
+
+const countryCode = (country: string) => ({
+  singapore: "sg",
+  malaysia: "my",
+  vietnam: "vn",
+  thailand: "th",
+  indonesia: "id",
+  philippines: "ph",
+  australia: "au",
+}[country.toLowerCase()] ?? country.toLowerCase().slice(0, 2));
+
+async function fetchTavilySearch(query: string, apiKey: string, location: string, country: string): Promise<WebResult[]> {
   const response = await fetch("https://api.tavily.com/search", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      query: `${query} in ${location} jobs graduate junior entry level associate -senior -staff -principal -lead -manager -director`,
+      query: fullJobQuery(query, location),
       topic: "general",
       search_depth: "basic",
       max_results: 12,
@@ -246,38 +304,173 @@ async function fetchWebSearch(query: string, apiKey: string, location: string, c
   });
   if (!response.ok) throw new Error(`Tavily search returned ${response.status}`);
   const payload = await response.json() as TavilySearchPayload;
-  return (payload.results ?? []).filter((result) => {
-    try {
-      const jobUrl = new URL(String(result.url ?? ""));
-      return jobUrl.protocol === "https:" && isIndividualJobResult(jobUrl, String(result.title ?? ""));
-    } catch {
-      return false;
-    }
-  });
+  return filterJobResults(payload.results ?? []);
 }
 
-async function extractWebResults(results: TavilyResult[], apiKey: string, location: string): Promise<Candidate[]> {
-  const extracted = new Map<string, string>();
-  const uniqueResults = [...new Map(results.map((result) => [canonicalUrl(String(result.url ?? "")), result])).values()];
-  const batches = Array.from({ length: Math.ceil(uniqueResults.length / 20) }, (_, index) => uniqueResults.slice(index * 20, index * 20 + 20));
-  await Promise.all(batches.map(async (batch) => {
-    const response = await fetch("https://api.tavily.com/extract", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ urls: batch.map((result) => result.url), extract_depth: "basic", format: "markdown", include_images: false }),
+async function fetchBraveSearch(query: string, apiKey: string, location: string, country: string): Promise<WebResult[]> {
+  const params = new URLSearchParams({
+    q: fullJobQuery(query, location),
+    count: "20",
+    country: countryCode(country).toUpperCase(),
+    search_lang: "en",
+    freshness: "pw",
+    safesearch: "moderate",
+  });
+  const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
+    headers: { Accept: "application/json", "X-Subscription-Token": apiKey },
+  });
+  if (!response.ok) throw new Error(`Brave Search returned ${response.status}`);
+  const payload = await response.json() as BraveSearchPayload;
+  return filterJobResults((payload.web?.results ?? []).map((result) => ({
+    title: result.title,
+    url: result.url,
+    content: result.description,
+  })));
+}
+
+async function fetchSerperSearch(query: string, apiKey: string, location: string, country: string): Promise<WebResult[]> {
+  const response = await fetch("https://google.serper.dev/search", {
+    method: "POST",
+    headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      q: fullJobQuery(query, location),
+      gl: countryCode(country),
+      hl: "en",
+      num: 20,
+      tbs: "qdr:w",
+    }),
+  });
+  if (!response.ok) throw new Error(`Serper search returned ${response.status}`);
+  const payload = await response.json() as SerperSearchPayload;
+  return filterJobResults((payload.organic ?? []).map((result) => ({
+    title: result.title,
+    url: result.link,
+    content: result.snippet,
+  })));
+}
+
+async function fetchExaSearch(query: string, apiKey: string, location: string): Promise<WebResult[]> {
+  const response = await fetch("https://api.exa.ai/search", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query: fullJobQuery(query, location),
+      type: "auto",
+      numResults: 20,
+      startPublishedDate: new Date(Date.now() - 8 * 86_400_000).toISOString(),
+      contents: { text: { maxCharacters: 20_000 } },
+    }),
+  });
+  if (!response.ok) throw new Error(`Exa search returned ${response.status}`);
+  const payload = await response.json() as ExaSearchPayload;
+  return filterJobResults((payload.results ?? []).map((result) => ({
+    title: result.title,
+    url: result.url,
+    content: result.highlights?.join(" "),
+    raw_content: result.text,
+  })));
+}
+
+async function fetchFirecrawlSearch(query: string, apiKey: string, location: string): Promise<WebResult[]> {
+  const response = await fetch("https://api.firecrawl.dev/v2/search", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query: fullJobQuery(query, location),
+      limit: 20,
+      sources: ["web"],
+      scrapeOptions: { formats: [{ type: "markdown" }], onlyMainContent: true },
+    }),
+  });
+  if (!response.ok) throw new Error(`Firecrawl search returned ${response.status}`);
+  const payload = await response.json() as FirecrawlSearchPayload;
+  return filterJobResults((payload.data?.web ?? []).map((result) => ({
+    title: result.title,
+    url: result.url,
+    content: result.description,
+    raw_content: result.markdown,
+  })));
+}
+
+async function fetchSerpApiSearch(query: string, apiKey: string, location: string, country: string): Promise<WebResult[]> {
+  const params = new URLSearchParams({
+    engine: "google",
+    q: fullJobQuery(query, location),
+    api_key: apiKey,
+    gl: countryCode(country),
+    hl: "en",
+    num: "20",
+    tbs: "qdr:w",
+  });
+  const response = await fetch(`https://serpapi.com/search.json?${params}`);
+  if (!response.ok) throw new Error(`SerpApi search returned ${response.status}`);
+  const payload = await response.json() as SerpApiSearchPayload;
+  if (payload.error) throw new Error(`SerpApi: ${payload.error}`);
+  return filterJobResults((payload.organic_results ?? []).map((result) => ({
+    title: result.title,
+    url: result.link,
+    content: result.snippet,
+  })));
+}
+
+async function searchProvider(provider: SearchProvider, query: string, apiKey: string, location: string, country: string) {
+  if (provider === "tavily") return fetchTavilySearch(query, apiKey, location, country);
+  if (provider === "exa") return fetchExaSearch(query, apiKey, location);
+  if (provider === "firecrawl") return fetchFirecrawlSearch(query, apiKey, location);
+  if (provider === "brave") return fetchBraveSearch(query, apiKey, location, country);
+  if (provider === "serpapi") return fetchSerpApiSearch(query, apiKey, location, country);
+  return fetchSerperSearch(query, apiKey, location, country);
+}
+
+async function directPageText(url: string) {
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "Brian-Job-Command-Center/1.0" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(8_000),
     });
-    if (!response.ok) return;
-    const payload = await response.json() as TavilyExtractPayload;
-    for (const result of payload.results ?? []) {
-      if (result.url) extracted.set(canonicalUrl(result.url), stripHtml(String(result.raw_content ?? "")));
+    if (!response.ok || !(response.headers.get("content-type") || "").includes("text/html")) return "";
+    return stripHtml((await response.text()).slice(0, 1_000_000)).slice(0, 80_000);
+  } catch {
+    return "";
+  }
+}
+
+async function extractWebResults(results: WebResult[], tavilyKey: string | null, location: string, provider: SearchProvider): Promise<Candidate[]> {
+  const extracted = new Map<string, string>();
+  const uniqueResults = [...new Map(results.map((result) => [canonicalUrl(String(result.url ?? "")), result])).values()].slice(0, 40);
+  const batches = Array.from({ length: Math.ceil(uniqueResults.length / 20) }, (_, index) => uniqueResults.slice(index * 20, index * 20 + 20));
+  if (tavilyKey) {
+    await Promise.all(batches.map(async (batch) => {
+      const response = await fetch("https://api.tavily.com/extract", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tavilyKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ urls: batch.map((result) => result.url), extract_depth: "basic", format: "markdown", include_images: false }),
+      });
+      if (!response.ok) return;
+      const payload = await response.json() as TavilyExtractPayload;
+      for (const result of payload.results ?? []) {
+        if (result.url) extracted.set(canonicalUrl(result.url), stripHtml(String(result.raw_content ?? "")));
+      }
+    }));
+  } else {
+    const missingContent = uniqueResults.filter((result) => stripHtml(String(result.raw_content ?? "")).length < 300);
+    for (let index = 0; index < missingContent.length; index += 8) {
+      const batch = missingContent.slice(index, index + 8);
+      const descriptions = await Promise.all(batch.map((result) => directPageText(String(result.url ?? ""))));
+      descriptions.forEach((description, batchIndex) => {
+        if (description) extracted.set(canonicalUrl(String(batch[batchIndex].url ?? "")), description);
+      });
     }
-  }));
+  }
 
   return uniqueResults.flatMap((result) => {
     try {
       const jobUrl = new URL(String(result.url ?? ""));
       const identity = webResultIdentity(result, location);
-      const description = extracted.get(canonicalUrl(jobUrl.toString())) || stripHtml(String(result.content ?? ""));
+      const description = stripHtml(String(result.raw_content ?? ""))
+        || extracted.get(canonicalUrl(jobUrl.toString()))
+        || stripHtml(String(result.content ?? ""));
       return [{
         company: identity.company,
         position: identity.position,
@@ -285,7 +478,7 @@ async function extractWebResults(results: TavilyResult[], apiKey: string, locati
         employmentType: /\bpart[- ]?time\b/i.test(description) ? "Part-time" : /\bcontract\b/i.test(description) ? "Contract" : /\bintern(?:ship)?\b/i.test(description) ? "Internship" : null,
         jobUrl: jobUrl.toString(),
         careerPage: `${jobUrl.protocol}//${jobUrl.hostname}`,
-        source: "Tavily web discovery",
+        source: `${({ tavily: "Tavily", exa: "Exa", firecrawl: "Firecrawl", brave: "Brave Search", serpapi: "SerpApi", serper: "Serper" } as Record<SearchProvider, string>)[provider]} web discovery`,
         atsPlatform: sourceLabel(jobUrl.hostname),
         externalId: canonicalUrl(jobUrl.toString()),
         description,
@@ -440,22 +633,25 @@ Deno.serve(async (request: Request) => {
 
   const { data: settingsData, error: settingsError } = await service
     .from("app_settings")
-    .select("discovery_enabled, discovery_time, discovery_timezone, discovery_source_urls, discovery_web_search_enabled, discovery_web_search_configured, discovery_search_queries, discovery_max_required_years, discovery_location, discovery_country, discovery_web_search_provider, discovery_monthly_credit_cap, last_scheduled_discovery_date")
+    .select("discovery_enabled, discovery_time, discovery_timezone, discovery_source_urls, discovery_web_search_enabled, discovery_web_search_configured, discovery_search_queries, discovery_max_required_years, discovery_location, discovery_country, discovery_web_search_provider, discovery_provider_order, discovery_monthly_credit_cap, last_scheduled_discovery_date")
     .eq("id", 1)
     .single();
   if (settingsError) return json(request, { error: settingsError.message }, 500);
   const settings = settingsData as DiscoverySettings;
 
   if (!settings.discovery_enabled && action === "scheduled") return json(request, { skipped: true, reason: "Discovery is paused" });
-  let webSearchKey = "";
+  let providerKeys: ProviderKeys = {};
   if (settings.discovery_web_search_enabled && settings.discovery_web_search_configured) {
-    const { data } = await service.rpc("read_web_search_key_for_service");
-    webSearchKey = typeof data === "string" ? data : "";
+    const { data, error } = await service.rpc("read_search_provider_keys_for_service");
+    if (error) return json(request, { error: error.message }, 500);
+    if (data && typeof data === "object") providerKeys = data as ProviderKeys;
   }
-  if (!settings.discovery_source_urls?.length && !webSearchKey) {
+  const configuredProviders = (settings.discovery_provider_order?.length ? settings.discovery_provider_order : DEFAULT_PROVIDER_ORDER)
+    .filter((provider, index, order) => DEFAULT_PROVIDER_ORDER.includes(provider) && order.indexOf(provider) === index && Boolean(providerKeys[provider]));
+  if (!settings.discovery_source_urls?.length && !configuredProviders.length) {
     await service.from("app_settings").update({
       discovery_status: "Waiting for sources",
-      discovery_message: "Add a direct company board or configure Tavily web discovery.",
+      discovery_message: "Add a direct company board or configure at least one web-search provider.",
       updated_at: new Date().toISOString(),
     }).eq("id", 1);
     return json(request, { skipped: true, reason: "No discovery source is configured" });
@@ -498,32 +694,64 @@ Deno.serve(async (request: Request) => {
   const webQueries = buildWebQueries(settings.discovery_search_queries ?? [], targetLocation);
   let tavilyUsage: { usage: number; limit: number; paygoUsage: number } | null = null;
   let webSearchRan = false;
-  if (webSearchKey && webQueries.length) {
-    try {
-      tavilyUsage = await fetchTavilyUsage(webSearchKey);
-      const safetyCap = Math.min(settings.discovery_monthly_credit_cap ?? 900, tavilyUsage.limit || 1000);
-      const estimatedCredits = webQueries.length + Math.ceil((webQueries.length * 12) / 5);
-      if (tavilyUsage.usage + estimatedCredits > safetyCap) {
-        failures.push(`Tavily safety limit reached at ${tavilyUsage.usage} of ${safetyCap} allowed monthly credits`);
-      } else {
+  let providerUsed: SearchProvider | null = null;
+  const providerAttempts: ProviderAttempt[] = [];
+  if (configuredProviders.length && webQueries.length) {
+    for (const provider of configuredProviders) {
+      const apiKey = providerKeys[provider]!;
+      try {
+        if (provider === "tavily") {
+          tavilyUsage = await fetchTavilyUsage(apiKey);
+          const safetyCap = Math.min(settings.discovery_monthly_credit_cap ?? 900, tavilyUsage.limit || 1000);
+          const estimatedCredits = webQueries.length + Math.ceil((webQueries.length * 12) / 5);
+          if (tavilyUsage.usage + estimatedCredits > safetyCap) {
+            providerAttempts.push({
+              provider,
+              status: "skipped",
+              reason: `Safety cap reached at ${tavilyUsage.usage} of ${safetyCap} credits`,
+              results: 0,
+            });
+            continue;
+          }
+        }
+
         const webResults = await Promise.all(webQueries.map(async (query) => {
           try {
-            return { rows: await fetchWebSearch(query, webSearchKey, targetLocation, targetCountry), error: null };
+            return { rows: await searchProvider(provider, query, apiKey, targetLocation, targetCountry), error: null };
           } catch (error) {
-            return { rows: [] as TavilyResult[], error: error instanceof Error ? error.message : `Could not search for ${query}` };
+            return { rows: [] as WebResult[], error: error instanceof Error ? error.message : `Could not search for ${query}` };
           }
         }));
-        const searchHits: TavilyResult[] = [];
-        for (const result of webResults) {
-          searchHits.push(...result.rows);
-          if (result.error) failures.push(result.error);
+        const successfulQueries = webResults.filter((result) => !result.error).length;
+        if (!successfulQueries) {
+          throw new Error(webResults.find((result) => result.error)?.error || `${provider} did not complete any query`);
         }
-        if (searchHits.length) allCandidates.push(...await extractWebResults(searchHits, webSearchKey, targetLocation));
+        const searchHits = webResults.flatMap((result) => result.rows);
+        if (searchHits.length) {
+          allCandidates.push(...await extractWebResults(searchHits, provider === "tavily" ? apiKey : null, targetLocation, provider));
+        }
+        providerUsed = provider;
         webSearchRan = true;
-        tavilyUsage = await fetchTavilyUsage(webSearchKey);
+        providerAttempts.push({
+          provider,
+          status: "used",
+          reason: successfulQueries === webQueries.length ? "All queries completed" : `${successfulQueries} of ${webQueries.length} queries completed`,
+          results: searchHits.length,
+        });
+        if (provider === "tavily") tavilyUsage = await fetchTavilyUsage(apiKey);
+        break;
+      } catch (error) {
+        providerAttempts.push({
+          provider,
+          status: "failed",
+          reason: error instanceof Error ? error.message : `${provider} was unavailable`,
+          results: 0,
+        });
       }
-    } catch (error) {
-      failures.push(error instanceof Error ? error.message : "Could not use Tavily web discovery");
+    }
+
+    if (!providerUsed) {
+      failures.push(`All configured web providers were unavailable: ${providerAttempts.map((attempt) => `${attempt.provider} (${attempt.reason})`).join(", ")}`);
     }
   }
 
@@ -596,7 +824,7 @@ Deno.serve(async (request: Request) => {
   const refreshed = refreshResults.filter((result) => !result.error).length;
 
   const now = new Date().toISOString();
-  const attemptedSources = parsedSources.length + (webSearchKey ? webQueries.length : 0);
+  const attemptedSources = parsedSources.length + (configuredProviders.length ? 1 : 0);
   const checkedSources = parsedSources.length + (webSearchRan ? 1 : 0);
   const status = attemptedSources > 0 && failures.length >= attemptedSources ? "Source error" : "Completed";
   const skipped = uniqueCandidates.length - eligible.length;
@@ -609,6 +837,8 @@ Deno.serve(async (request: Request) => {
     discovery_message: message,
     discovery_last_credit_usage: tavilyUsage?.usage ?? null,
     discovery_last_credit_limit: tavilyUsage?.limit ?? null,
+    discovery_last_provider: providerUsed,
+    discovery_provider_status: providerAttempts,
     updated_at: now,
   }).eq("id", 1);
 
@@ -619,9 +849,10 @@ Deno.serve(async (request: Request) => {
     duplicates: eligible.length - inserted,
     refreshed,
     sources: checkedSources,
-    webSearchConfigured: Boolean(webSearchKey),
-    webSearchProvider: "tavily",
+    webSearchConfigured: configuredProviders.length > 0,
+    webSearchProvider: providerUsed,
     webSearchRan,
+    providerAttempts,
     targetLocation,
     tavilyUsage,
     skipped,
