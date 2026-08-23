@@ -95,6 +95,9 @@ test("uses Brian's logo, browser-time greeting, clock, and personal footer", () 
   assert.match(pageSource, /browserTimeZone/);
   assert.match(pageSource, /Proudly made by Le Do Nguyen Tu/);
   assert.match(globalStyles, /\.browser-clock\{/);
+  assert.match(globalStyles, /grid-template-columns:34px minmax\(0,1fr\) 34px/);
+  assert.match(globalStyles, /\.connection-status\{[^}]*white-space:nowrap/);
+  assert.match(globalStyles, /input\[type="time"\]\{[^}]*min-width:0/);
 });
 
 test("expands supported Singapore company career sources efficiently", () => {
@@ -118,8 +121,14 @@ test("combines web-wide discovery with strict fresh-graduate filtering", () => {
   assert.match(discoverySource, /DEFAULT_PROVIDER_ORDER/);
   assert.match(discoverySource, /providerAttempts/);
   assert.match(discoverySource, /slice\(0, 10\)/);
-  assert.match(discoverySource, /successfulProviders >= 2/);
-  assert.match(discoverySource, /result set was small so another provider will also be checked/);
+  assert.match(discoverySource, /interleaveUniqueResults/);
+  assert.match(discoverySource, /providersWithResults >= 2 && eligibleWebCandidates >= 12/);
+  assert.match(discoverySource, /successfulProviders >= 3/);
+  assert.match(discoverySource, /searchFunnel/);
+  assert.match(discoverySource, /const isDue = clock\.minutes >= target/);
+  assert.match(discoverySource, /Use Fetch now to run another manual scan/);
+  assert.match(pageSource, /action: "manual"/);
+  assert.match(pageSource, /Starting a new manual scan/);
   assert.match(discoverySource, /Workday Ashby SmartRecruiters Workable iCIMS Oracle/);
   assert.match(discoverySource, /discovery_monthly_credit_cap/);
   assert.match(discoverySource, /Safety cap reached/);
