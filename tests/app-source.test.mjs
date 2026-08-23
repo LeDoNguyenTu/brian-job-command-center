@@ -250,6 +250,20 @@ test("checks provider keys without consuming search credits", () => {
   assert.match(discoverySource, /Math\.max\(keyUsage, accountUsage\)/);
 });
 
+test("keeps mobile controls centered and warns before discarding settings", () => {
+  assert.match(pageSource, /dashboard-icon-\$\{name\}/);
+  assert.match(pageSource, /className="select-control"/);
+  assert.match(pageSource, /className="schedule-time-field"/);
+  assert.match(pageSource, /const hasUnsavedSecurityChanges = \(\) =>/);
+  assert.match(pageSource, /You have unsaved changes in Settings\. Close without saving them\?/);
+  assert.match(pageSource, /onClick=\{requestCloseSecurity\}/);
+  assert.match(globalStyles, /\.dashboard-icon-sparkles\{transform:translate\(-1px,-\.5px\)\}/);
+  assert.match(globalStyles, /\.select-control:after\{[^}]*top:50%/);
+  assert.match(globalStyles, /\.browser-clock small\{overflow:visible;[^}]*white-space:normal/);
+  assert.match(globalStyles, /\.schedule-time-field\{width:min\(100%,190px\)/);
+  assert.match(globalStyles, /\.salary-card\{isolation:isolate;overflow:hidden;background-clip:padding-box\}/);
+});
+
 test("persists the dashboard scout toggle and visibly pauses its radar", () => {
   assert.match(pageSource, /const toggleDiscoveryAutomation = async/);
   assert.match(pageSource, /discovery_enabled: nextEnabled/);

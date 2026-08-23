@@ -684,7 +684,7 @@ function DashboardIcon({ name }: { name: "clock" | "sparkles" | "queue" | "block
     records: <><path d="M20 12a8 8 0 1 1-2.35-5.65" /><path d="M20 4v5h-5" /></>,
   };
 
-  return <svg className="dashboard-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{paths[name]}</svg>;
+  return <svg className={`dashboard-icon dashboard-icon-${name}`} viewBox="0 0 24 24" aria-hidden="true" focusable="false">{paths[name]}</svg>;
 }
 
 function JobCard({
@@ -1287,6 +1287,57 @@ export default function Home() {
     .split(/\r?\n|,/)
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean))].slice(0, limit);
+
+  const hasUnsavedSecurityChanges = () => {
+    const hasPendingSecret = [
+      currentPassword,
+      newPassword,
+      confirmPassword,
+      notionToken,
+      webSearchKey,
+      exaSearchKey,
+      firecrawlSearchKey,
+      braveSearchKey,
+      serpApiSearchKey,
+      serperSearchKey,
+      documentKey,
+    ].some((value) => value.trim().length > 0);
+
+    if (!settings) return hasPendingSecret;
+
+    const sameList = (draft: string[], saved: string[]) => JSON.stringify(draft) === JSON.stringify(saved);
+    const normalizedDraftLines = (value: string) => [...new Set(value
+      .split(/\r?\n|,/)
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean))];
+    const savedTime = (settings.discovery_time || "08:00").slice(0, 5);
+    const savedDocumentProvider = settings.document_provider || "gemini";
+    const savedDocumentModel = settings.document_model || "gemini-3.6-flash";
+
+    return hasPendingSecret
+      || accountEmail.trim().toLowerCase() !== currentUserEmail.trim().toLowerCase()
+      || discoveryEnabled !== (settings.discovery_enabled ?? true)
+      || discoveryTime !== savedTime
+      || discoveryTimezone !== (settings.discovery_timezone || "Asia/Singapore")
+      || !sameList(normalizedDiscoverySources(), settings.discovery_source_urls ?? [])
+      || webSearchEnabled !== (settings.discovery_web_search_enabled ?? true)
+      || !sameList(normalizedWebSearchQueries(), settings.discovery_search_queries?.length ? settings.discovery_search_queries : DEFAULT_DISCOVERY_QUERIES)
+      || !sameList(normalizedDraftLines(targetRoleKeywords), settings.discovery_target_role_keywords ?? [])
+      || !sameList(normalizedDraftLines(excludedTitleKeywords), settings.discovery_excluded_title_keywords ?? [])
+      || maxRequiredYears !== (settings.discovery_max_required_years ?? 1)
+      || discoveryLocation.trim() !== (settings.discovery_location || "Singapore")
+      || discoveryCountry !== (settings.discovery_country || "singapore")
+      || sourceLearningEnabled !== (settings.discovery_source_learning_enabled ?? true)
+      || documentProvider !== savedDocumentProvider
+      || documentModel.trim() !== savedDocumentModel
+      || documentEndpoint.trim() !== (settings.document_endpoint || "")
+      || sessionTimeoutMinutes !== (settings.session_timeout_minutes || 60);
+  };
+
+  const requestCloseSecurity = () => {
+    if (hasUnsavedSecurityChanges() && !window.confirm("You have unsaved changes in Settings. Close without saving them?")) return;
+    setSecurityOpen(false);
+  };
 
   const discoveryStateCopy = (enabled: boolean, sourceTotal: number, webReady = webSearchEnabled && webSearchConfigured) => ({
     status: enabled ? sourceTotal || webReady ? "Scheduled" : "Waiting for sources" : "Paused",
@@ -2044,9 +2095,9 @@ export default function Home() {
                 ))}
               </div>
               <div className="pipeline-tools">
-                <label className="date-sort"><span>Decision</span><select value={pipelineFilter} onChange={(event) => { setPipelineFilter(event.target.value); setVisibleJobCount(JOBS_PER_PAGE); }}><option>Active</option><option>Accepted</option><option>Applied</option><option>Rejected</option><option>All statuses</option></select></label>
-                <label className="date-sort feed-date-filter"><span>Feed date</span><select value={feedDate} onChange={(event) => { setFeedDate(event.target.value); setVisibleJobCount(JOBS_PER_PAGE); }}><option value="all">All feed dates</option>{availableFeedDates.map((date) => <option key={date} value={date}>{feedDateLabel(date)}</option>)}</select></label>
-                <label className="date-sort"><span>Sort by date</span><select value={jobSort} onChange={(event) => { setJobSort(event.target.value as "newest" | "oldest"); setVisibleJobCount(JOBS_PER_PAGE); }}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+                <label className="date-sort"><span className="filter-label">Decision</span><span className="select-control"><select value={pipelineFilter} onChange={(event) => { setPipelineFilter(event.target.value); setVisibleJobCount(JOBS_PER_PAGE); }}><option>Active</option><option>Accepted</option><option>Applied</option><option>Rejected</option><option>All statuses</option></select></span></label>
+                <label className="date-sort feed-date-filter"><span className="filter-label">Feed date</span><span className="select-control"><select value={feedDate} onChange={(event) => { setFeedDate(event.target.value); setVisibleJobCount(JOBS_PER_PAGE); }}><option value="all">All feed dates</option>{availableFeedDates.map((date) => <option key={date} value={date}>{feedDateLabel(date)}</option>)}</select></span></label>
+                <label className="date-sort"><span className="filter-label">Sort by date</span><span className="select-control"><select value={jobSort} onChange={(event) => { setJobSort(event.target.value as "newest" | "oldest"); setVisibleJobCount(JOBS_PER_PAGE); }}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></span></label>
                 <p>Showing {visibleJobs.length} of {filteredJobs.length}</p>
               </div>
             </div>
@@ -2326,9 +2377,9 @@ export default function Home() {
       ) : null}
 
       {securityOpen ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSecurityOpen(false)}>
+        <div className="modal-backdrop" role="presentation" onMouseDown={requestCloseSecurity}>
           <section className="security-modal" role="dialog" aria-modal="true" aria-labelledby="security-title" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="modal-close" onClick={() => setSecurityOpen(false)} aria-label="Close security and connections">×</button>
+            <button className="modal-close" onClick={requestCloseSecurity} aria-label="Close security and connections">×</button>
             <p className="eyebrow">Private administration</p>
             <h2 id="security-title">Security and connections</h2>
             <p className="security-intro">Manage job discovery, sign-in credentials, passkeys, optional backup, and your administrator session.</p>
@@ -2349,7 +2400,7 @@ export default function Home() {
                   <label><span>City, region, or country</span><input value={discoveryLocation} onChange={(event) => setDiscoveryLocation(event.target.value)} placeholder="Singapore, Kuala Lumpur, Ho Chi Minh City..." required /></label>
                 </div>
                 <div className="discovery-schedule-grid">
-                  <label><span>Daily time</span><input type="time" value={discoveryTime} onChange={(event) => setDiscoveryTime(event.target.value)} required /></label>
+                  <label className="schedule-time-field"><span>Daily time</span><input type="time" value={discoveryTime} onChange={(event) => setDiscoveryTime(event.target.value)} required /></label>
                   <label><span>Timezone</span><select value={discoveryTimezone} onChange={(event) => setDiscoveryTimezone(event.target.value)}><option value="Asia/Singapore">Singapore - SGT</option><option value="Asia/Ho_Chi_Minh">Vietnam - ICT</option><option value="Asia/Kuala_Lumpur">Kuala Lumpur - MYT</option><option value="UTC">UTC</option></select></label>
                 </div>
                 <div className="web-search-heading"><label className="checkbox-field discovery-toggle"><input type="checkbox" checked={webSearchEnabled} onChange={(event) => setWebSearchEnabled(event.target.checked)} /><span>Search and extract the wider web</span></label><span className={webSearchConfigured ? "connection-status connected" : "connection-status"}>{webSearchConfigured ? "Provider pool secured" : "API key needed"}</span></div>
