@@ -198,14 +198,23 @@ test("keeps multiple private resume formats and requires criteria approval", () 
   assert.match(globalStyles, /\.criteria-proposal-actions button\{min-height:40px\}/);
 });
 
-test("tests every configured search provider without inserting jobs", () => {
+test("checks provider keys without consuming search credits", () => {
   assert.match(pageSource, /const testSearchProviders = async/);
   assert.match(pageSource, /action: "diagnostic"/);
-  assert.match(pageSource, /Test saved keys/);
-  assert.match(pageSource, /provider-health-grid/);
-  assert.match(discoverySource, /action === "diagnostic"/);
-  assert.match(discoverySource, /Key accepted and test search completed/);
-  assert.match(discoverySource, /for \(const provider of DEFAULT_PROVIDER_ORDER\)/);
+  assert.match(pageSource, /Check key status/);
+  assert.match(pageSource, /Last used/);
+  assert.match(pageSource, /HTTP \$\{provider\.httpStatus\}/);
+  assert.match(globalStyles, /\.provider-last-used/);
+  assert.match(discoverySource, /checkProviderWithoutSearch/);
+  assert.match(discoverySource, /api\.tavily\.com\/usage/);
+  assert.match(discoverySource, /api\.firecrawl\.dev\/v2\/team\/credit-usage/);
+  assert.match(discoverySource, /serpapi\.com\/account\.json/);
+  const diagnosticBranch = discoverySource.slice(
+    discoverySource.indexOf('if (action === "diagnostic")'),
+    discoverySource.indexOf("if (!settings.discovery_source_urls?.length"),
+  );
+  assert.doesNotMatch(diagnosticBranch, /searchProvider\(/);
+  assert.match(discoverySource, /Math\.max\(keyUsage, accountUsage\)/);
 });
 
 test("persists the dashboard scout toggle and visibly pauses its radar", () => {
