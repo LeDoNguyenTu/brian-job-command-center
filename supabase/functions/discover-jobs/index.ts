@@ -358,6 +358,24 @@ const filterJobResults = (results: WebResult[]) => results.filter((result) => {
   }
 });
 
+function interleaveUniqueResults(resultSets: WebResult[][], limit = 80) {
+  const rows: WebResult[] = [];
+  const seen = new Set<string>();
+  const longest = Math.max(0, ...resultSets.map((results) => results.length));
+  for (let index = 0; index < longest && rows.length < limit; index += 1) {
+    for (const results of resultSets) {
+      const result = results[index];
+      if (!result?.url) continue;
+      const key = canonicalUrl(String(result.url));
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      rows.push(result);
+      if (rows.length >= limit) break;
+    }
+  }
+  return rows;
+}
+
 const fullJobQuery = (query: string, location: string) =>
   `${query} in ${location} jobs graduate junior entry level associate -senior -staff -principal -lead -manager -director`;
 
@@ -533,7 +551,7 @@ async function directPageText(url: string) {
 
 async function extractWebResults(results: WebResult[], tavilyKey: string | null, location: string, provider: SearchProvider): Promise<Candidate[]> {
   const extracted = new Map<string, string>();
-  const uniqueResults = [...new Map(results.map((result) => [canonicalUrl(String(result.url ?? "")), result])).values()].slice(0, 40);
+  const uniqueResults = [...new Map(results.map((result) => [canonicalUrl(String(result.url ?? "")), result])).values()].slice(0, 80);
   const batches = Array.from({ length: Math.ceil(uniqueResults.length / 20) }, (_, index) => uniqueResults.slice(index * 20, index * 20 + 20));
   if (tavilyKey) {
     await Promise.all(batches.map(async (batch) => {
@@ -850,9 +868,14 @@ Deno.serve(async (request: Request) => {
     localDate = clock.date;
     const [hour, minute] = (settings.discovery_time || "08:00").split(":").map(Number);
     const target = hour * 60 + minute;
-    const isDue = clock.minutes >= target && clock.minutes < target + 5;
+    const isDue = clock.minutes >= target;
     if (!isDue || settings.last_scheduled_discovery_date === localDate) {
-      return json(request, { skipped: true, reason: settings.last_scheduled_discovery_date === localDate ? "Already completed today" : "Not due" });
+      return json(request, {
+        skipped: true,
+        reason: settings.last_scheduled_discovery_date === localDate
+          ? "Today's scheduled scan is already complete. Use Fetch now to run another manual scan."
+          : "The scheduled time has not arrived yet. Use Fetch now for an immediate manual scan.",
+      });
     }
   }
 
@@ -881,6 +904,9 @@ Deno.serve(async (request: Request) => {
   let webSearchRan = false;
   let providerUsed: SearchProvider | null = null;
   let successfulProviders = 0;
+  let providersWithResults = 0;
+  let rawWebHits = 0;
+  const webCandidates: Candidate[] = [];
   const providerAttempts: ProviderAttempt[] = [];
   if (configuredProviders.length && webQueries.length) {
     for (const provider of configuredProviders) {
@@ -912,28 +938,40 @@ Deno.serve(async (request: Request) => {
         if (!successfulQueries) {
           throw new Error(webResults.find((result) => result.error)?.error || `${provider} did not complete any query`);
         }
-        const searchHits = webResults.flatMap((result) => result.rows);
+        const rawSearchHits = webResults.flatMap((result) => result.rows);
+        const searchHits = interleaveUniqueResults(webResults.map((result) => result.rows));
+        rawWebHits += rawSearchHits.length;
+        let extractedCandidates: Candidate[] = [];
         if (searchHits.length) {
-          allCandidates.push(...await extractWebResults(searchHits, provider === "tavily" ? apiKey : null, targetLocation, provider));
+          extractedCandidates = await extractWebResults(searchHits, provider === "tavily" ? apiKey : null, targetLocation, provider);
+          allCandidates.push(...extractedCandidates);
+          webCandidates.push(...extractedCandidates);
+          providersWithResults += 1;
         }
         providerUsed = provider;
         webSearchRan = true;
         successfulProviders += 1;
+        const eligibleWebCandidates = [...new Map(webCandidates.map((candidate) => [canonicalUrl(candidate.jobUrl), candidate])).values()]
+          .filter((candidate) => assessEligibility(
+            candidate,
+            settings.discovery_max_required_years ?? 1,
+            targetLocation,
+            targetCountry,
+            settings.discovery_target_role_keywords ?? [],
+            settings.discovery_excluded_title_keywords ?? [],
+          ).eligible).length;
         providerAttempts.push({
           provider,
           status: "used",
-          reason: successfulQueries === webQueries.length
-            ? searchHits.length < 12 && successfulProviders < 2
-              ? "All queries completed, but the result set was small so another provider will also be checked"
-              : "All queries completed"
-            : `${successfulQueries} of ${webQueries.length} queries completed`,
+          reason: `${successfulQueries} of ${webQueries.length} queries completed, ${rawSearchHits.length} raw hits, ${searchHits.length} unique job pages, ${eligibleWebCandidates} matching web listings so far`,
           results: searchHits.length,
           httpStatus: 200,
           checkedAt: new Date().toISOString(),
           zeroCreditCheck: false,
         });
         if (provider === "tavily") tavilyUsage = await fetchTavilyUsage(apiKey);
-        if (searchHits.length >= 12 || successfulProviders >= 2) break;
+        const enoughCoverage = providersWithResults >= 2 && eligibleWebCandidates >= 12;
+        if (enoughCoverage || successfulProviders >= 3) break;
       } catch (error) {
         providerAttempts.push({
           provider,
@@ -1079,7 +1117,7 @@ Deno.serve(async (request: Request) => {
   const status = attemptedSources > 0 && failures.length >= attemptedSources ? "Source error" : "Completed";
   const skipped = uniqueCandidates.length - eligible.length;
   const newlyPromoted = nextDirectSources.length - (settings.discovery_source_urls?.length ?? 0);
-  const message = `${inserted} new, ${eligible.length - inserted} already tracked or repeated, ${skipped} unsuitable skipped. ${checkedSources} source type${checkedSources === 1 ? "" : "s"} checked.`
+  const message = `Scan completed: ${inserted} new, ${eligible.length - inserted} matching listings refreshed or already tracked. Reviewed ${uniqueCandidates.length} unique listings, including ${webCandidates.length} web candidates from ${rawWebHits} raw web hits; ${skipped} did not meet the active filters. ${checkedSources} source type${checkedSources === 1 ? "" : "s"} checked.`
     + (newlyPromoted > 0 ? ` ${newlyPromoted} reusable direct feed${newlyPromoted === 1 ? "" : "s"} learned from 80+ matches.` : "")
     + (failures.length ? ` ${failures.length} source${failures.length === 1 ? "" : "s"} need attention.` : "");
   await service.from("app_settings").update({
@@ -1107,6 +1145,17 @@ Deno.serve(async (request: Request) => {
     webSearchProvider: providerUsed,
     webSearchRan,
     providerAttempts,
+    searchFunnel: {
+      queries: webQueries.length,
+      providersChecked: providerAttempts.filter((attempt) => attempt.status === "used").length,
+      rawWebHits,
+      webCandidates: webCandidates.length,
+      uniqueListings: uniqueCandidates.length,
+      eligible: eligible.length,
+      newListings: inserted,
+      duplicates: eligible.length - inserted,
+      filteredOut: skipped,
+    },
     learnedSources: learnedSources.length,
     promotedSources: newlyPromoted,
     targetLocation,
