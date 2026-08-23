@@ -7,6 +7,7 @@ const supabaseSource = await readFile(new URL("../lib/supabase.ts", import.meta.
 const globalStyles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 const layoutSource = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
 const nextConfigSource = await readFile(new URL("../next.config.ts", import.meta.url), "utf8");
+const proxySource = await readFile(new URL("../proxy.ts", import.meta.url), "utf8");
 const discoverySource = await readFile(new URL("../supabase/functions/discover-jobs/index.ts", import.meta.url), "utf8");
 const sourceMigration = await readFile(new URL("../supabase/migrations/202608190011_expand_singapore_discovery_sources.sql", import.meta.url), "utf8");
 const webDiscoveryMigration = await readFile(new URL("../supabase/migrations/20260822205618_broaden_job_discovery_and_decisions.sql", import.meta.url), "utf8");
@@ -50,8 +51,9 @@ test("limits the job list and provides date sorting", () => {
 });
 
 test("keeps job titles clear and provides accessible score and text controls", () => {
-  assert.match(pageSource, /--match-score/);
-  assert.match(globalStyles, /conic-gradient\(var\(--score-color\)/);
+  assert.match(pageSource, /className="score-ring-progress"/);
+  assert.match(pageSource, /strokeDasharray={`\${Math\.max/);
+  assert.match(globalStyles, /\.score-ring-value\{stroke:var\(--score-color\)/);
   assert.match(globalStyles, /\.score-ring\{[^}]*bottom:18px/);
   assert.match(globalStyles, /\.match-pill\.review\{[^}]*var\(--purple-bright\)/);
   assert.match(globalStyles, /\.date-sort:after/);
@@ -251,8 +253,15 @@ test("keeps a deploy-safe Supabase public configuration fallback", () => {
 
 test("sends defensive browser security headers on every route", () => {
   assert.match(nextConfigSource, /poweredByHeader: false/);
-  assert.match(nextConfigSource, /Content-Security-Policy/);
-  assert.match(nextConfigSource, /frame-ancestors 'none'/);
+  assert.match(proxySource, /Content-Security-Policy/);
+  assert.match(proxySource, /frame-ancestors 'none'/);
+  assert.match(proxySource, /'nonce-\${nonce}' 'strict-dynamic'/);
+  assert.doesNotMatch(proxySource, /unsafe-inline/);
+  assert.match(proxySource, /script-src-attr 'none'/);
+  assert.match(proxySource, /style-src-attr 'unsafe-hashes' 'sha256-/);
+  assert.match(layoutSource, /await headers\(\)/);
+  assert.match(layoutSource, /data-csp-nonce/);
+  assert.match(pageSource, /script\.nonce = document\.body\.dataset\.cspNonce/);
   assert.match(nextConfigSource, /X-Content-Type-Options/);
   assert.match(nextConfigSource, /X-Frame-Options/);
   assert.match(nextConfigSource, /Referrer-Policy/);
