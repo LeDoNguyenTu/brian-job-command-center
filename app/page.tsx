@@ -674,6 +674,18 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
 
 const navItems = ["Overview", "Pipeline", "Resumes", "Profile"];
 
+function DashboardIcon({ name }: { name: "clock" | "sparkles" | "queue" | "blocked" | "records" }) {
+  const paths = {
+    clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5v5l3.25 2" /></>,
+    sparkles: <><path d="m12 3 1.3 4.1L17.5 8.5l-4.2 1.4L12 14l-1.3-4.1-4.2-1.4 4.2-1.4L12 3Z" /><path d="m18.5 14 .7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7.7-2.1Z" /></>,
+    queue: <><rect x="4" y="5" width="16" height="14" rx="2.5" /><path d="M8 9h8M8 13h6" /></>,
+    blocked: <><path d="M12 3.5 20 18H4L12 3.5Z" /><path d="M12 8.5v4M12 15.5h.01" /></>,
+    records: <><path d="M20 12a8 8 0 1 1-2.35-5.65" /><path d="M20 4v5h-5" /></>,
+  };
+
+  return <svg className="dashboard-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{paths[name]}</svg>;
+}
+
 function JobCard({
   job,
   saved,
@@ -690,7 +702,21 @@ function JobCard({
   decisionBusy: boolean;
 }) {
   return (
-    <article className="job-card">
+    <article
+      className="job-card"
+      role="button"
+      tabIndex={0}
+      aria-label={`Review details for ${job.role} at ${job.company}`}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
+        onOpen();
+      }}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        onOpen();
+      }}
+    >
       <div className={`company-mark ${job.tone}`}>{job.initials}</div>
       <div className="job-main">
         <div className="job-heading">
@@ -1953,7 +1979,7 @@ export default function Home() {
             </div>
             <div className="welcome-meta">
               <div className="browser-clock" aria-label={`Browser time in ${browserTimeZone}`}>
-                <span aria-hidden="true">◷</span>
+                <span aria-hidden="true"><DashboardIcon name="clock" /></span>
                 <div><time suppressHydrationWarning>{clockLabel}</time><small suppressHydrationWarning>{browserTimeZone}{timeZoneShort ? ` · ${timeZoneShort}` : ""}</small></div>
               </div>
               <div className="secure-chip"><span aria-hidden="true">◉</span> Supabase admin session</div>
@@ -1961,10 +1987,10 @@ export default function Home() {
           </section>
 
           <section className="stats-grid" aria-label="Application summary">
-            <article className="stat-card featured"><div className="stat-top"><span className="stat-icon">✦</span><span className="trend">Live score</span></div><strong>{strongCount}</strong><p>Strong {strongCount === 1 ? "match" : "matches"}</p></article>
-            <article className="stat-card"><div className="stat-top"><span className="stat-icon cyan-icon">◫</span><span className="muted-label">Needs you</span></div><strong>{reviewCount}</strong><p>Review queue</p></article>
-            <article className="stat-card"><div className="stat-top"><span className="stat-icon amber-icon">!</span><span className="muted-label">Filtered safely</span></div><strong>{blockedCount}</strong><p>Blocked roles</p></article>
-            <article className="stat-card"><div className="stat-top"><span className="stat-icon green-icon">↻</span><span className="live-label"><i /> Live</span></div><strong className="time-stat">{jobs.length}</strong><p>Supabase records</p></article>
+            <article className="stat-card featured"><div className="stat-top"><span className="stat-icon"><DashboardIcon name="sparkles" /></span><span className="trend">Live score</span></div><strong>{strongCount}</strong><p>Strong {strongCount === 1 ? "match" : "matches"}</p></article>
+            <article className="stat-card"><div className="stat-top"><span className="stat-icon cyan-icon"><DashboardIcon name="queue" /></span><span className="muted-label">Needs you</span></div><strong>{reviewCount}</strong><p>Review queue</p></article>
+            <article className="stat-card"><div className="stat-top"><span className="stat-icon amber-icon"><DashboardIcon name="blocked" /></span><span className="muted-label">Filtered safely</span></div><strong>{blockedCount}</strong><p>Blocked roles</p></article>
+            <article className="stat-card"><div className="stat-top"><span className="stat-icon green-icon"><DashboardIcon name="records" /></span><span className="live-label"><i /> Live</span></div><strong className="time-stat">{jobs.length}</strong><p>Supabase records</p></article>
           </section>
 
           <section className="focus-grid">
