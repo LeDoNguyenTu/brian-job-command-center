@@ -361,7 +361,7 @@ const filterJobResults = (results: WebResult[]) => results.filter((result) => {
   }
 });
 
-function interleaveUniqueResults(resultSets: WebResult[][], limit = 80) {
+function interleaveUniqueResults(resultSets: WebResult[][], limit = 48) {
   const rows: WebResult[] = [];
   const seen = new Set<string>();
   const longest = Math.max(0, ...resultSets.map((results) => results.length));
@@ -559,7 +559,7 @@ async function directPageText(url: string) {
 
 async function extractWebResults(results: WebResult[], tavilyKey: string | null, location: string, provider: SearchProvider): Promise<Candidate[]> {
   const extracted = new Map<string, string>();
-  const uniqueResults = [...new Map(results.map((result) => [canonicalUrl(String(result.url ?? "")), result])).values()].slice(0, 80);
+  const uniqueResults = [...new Map(results.map((result) => [canonicalUrl(String(result.url ?? "")), result])).values()].slice(0, 48);
   const batches = Array.from({ length: Math.ceil(uniqueResults.length / 20) }, (_, index) => uniqueResults.slice(index * 20, index * 20 + 20));
   if (tavilyKey) {
     await Promise.all(batches.map(async (batch) => {
@@ -575,7 +575,7 @@ async function extractWebResults(results: WebResult[], tavilyKey: string | null,
         if (result.url) extracted.set(canonicalUrl(result.url), stripHtml(String(result.raw_content ?? "")));
       }
     }));
-  } else {
+  } else if (provider !== "exa" && provider !== "firecrawl") {
     const missingContent = uniqueResults.filter((result) => stripHtml(String(result.raw_content ?? "")).length < 300).slice(0, 32);
     const pageBatches = Array.from({ length: Math.ceil(missingContent.length / 8) }, (_, index) => missingContent.slice(index * 8, index * 8 + 8));
     await Promise.all(pageBatches.map(async (batch) => {
