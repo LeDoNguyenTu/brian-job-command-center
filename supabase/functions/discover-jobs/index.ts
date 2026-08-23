@@ -593,7 +593,7 @@ function buildWebQueries(configuredQueries: string[], location: string) {
     `early career technology jobs ${location} Workday Ashby SmartRecruiters Workable iCIMS Oracle`,
     `company careers graduate technology roles ${location} software cybersecurity cloud IT support`,
   ];
-  return [...new Map([...configured, ...coverageQueries].filter(Boolean).map((query) => [query.toLowerCase(), query])).values()].slice(0, 6);
+  return [...new Map([...configured, ...coverageQueries].filter(Boolean).map((query) => [query.toLowerCase(), query])).values()].slice(0, 10);
 }
 
 function localClock(timeZone: string) {
@@ -880,6 +880,7 @@ Deno.serve(async (request: Request) => {
   let tavilyUsage: { usage: number; limit: number; paygoUsage: number } | null = null;
   let webSearchRan = false;
   let providerUsed: SearchProvider | null = null;
+  let successfulProviders = 0;
   const providerAttempts: ProviderAttempt[] = [];
   if (configuredProviders.length && webQueries.length) {
     for (const provider of configuredProviders) {
@@ -917,17 +918,22 @@ Deno.serve(async (request: Request) => {
         }
         providerUsed = provider;
         webSearchRan = true;
+        successfulProviders += 1;
         providerAttempts.push({
           provider,
           status: "used",
-          reason: successfulQueries === webQueries.length ? "All queries completed" : `${successfulQueries} of ${webQueries.length} queries completed`,
+          reason: successfulQueries === webQueries.length
+            ? searchHits.length < 12 && successfulProviders < 2
+              ? "All queries completed, but the result set was small so another provider will also be checked"
+              : "All queries completed"
+            : `${successfulQueries} of ${webQueries.length} queries completed`,
           results: searchHits.length,
           httpStatus: 200,
           checkedAt: new Date().toISOString(),
           zeroCreditCheck: false,
         });
         if (provider === "tavily") tavilyUsage = await fetchTavilyUsage(apiKey);
-        break;
+        if (searchHits.length >= 12 || successfulProviders >= 2) break;
       } catch (error) {
         providerAttempts.push({
           provider,
