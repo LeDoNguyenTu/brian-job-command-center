@@ -39,6 +39,7 @@ type DiscoverySettings = {
   discovery_monthly_credit_cap: number;
   discovery_source_learning_enabled: boolean;
   discovery_learned_sources: LearnedSource[];
+  discovery_provider_status?: ProviderAttempt[];
   last_scheduled_discovery_date: string | null;
 };
 
@@ -137,6 +138,9 @@ type ProviderAttempt = {
   status: "used" | "skipped" | "failed";
   reason: string;
   results: number;
+  httpStatus?: number | null;
+  checkedAt?: string | null;
+  zeroCreditCheck?: boolean;
 };
 
 const DEFAULT_PROVIDER_ORDER: SearchProvider[] = ["tavily", "exa", "firecrawl", "brave", "serpapi", "serper"];
@@ -286,11 +290,63 @@ async function fetchTavilyUsage(apiKey: string) {
   });
   if (!response.ok) throw new Error(`Tavily usage check returned ${response.status}`);
   const payload = await response.json() as TavilyUsagePayload;
+  const keyUsage = Number(payload.key?.usage ?? 0);
+  const accountUsage = Number(payload.account?.plan_usage ?? 0);
+  const keyLimit = Number(payload.key?.limit ?? 0);
+  const accountLimit = Number(payload.account?.plan_limit ?? 0);
   return {
-    usage: Number(payload.key?.usage ?? payload.account?.plan_usage ?? 0),
-    limit: Number(payload.key?.limit ?? payload.account?.plan_limit ?? 1000),
+    // The monthly safety ceiling belongs to the account. A project-scoped key may
+    // report zero even when the account has already consumed credits.
+    usage: Math.max(keyUsage, accountUsage),
+    limit: accountLimit || keyLimit || 1000,
     paygoUsage: Number(payload.account?.paygo_usage ?? 0),
+    httpStatus: response.status,
   };
+}
+
+async function checkProviderWithoutSearch(provider: SearchProvider, apiKey: string) {
+  const checkedAt = new Date().toISOString();
+  if (provider === "tavily") {
+    const response = await fetch("https://api.tavily.com/usage", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    const usage = response.ok ? await response.json() as TavilyUsagePayload : null;
+    const keyUsage = Number(usage?.key?.usage ?? 0);
+    const accountUsage = Number(usage?.account?.plan_usage ?? 0);
+    const keyLimit = Number(usage?.key?.limit ?? 0);
+    const accountLimit = Number(usage?.account?.plan_limit ?? 0);
+    return {
+      httpStatus: response.status,
+      checkedAt,
+      reason: response.ok ? "Key accepted by Tavily's free usage endpoint" : `Tavily usage endpoint returned HTTP ${response.status}`,
+      tavilyUsage: response.ok ? {
+        usage: Math.max(keyUsage, accountUsage),
+        limit: accountLimit || keyLimit || 1000,
+        paygoUsage: Number(usage?.account?.paygo_usage ?? 0),
+      } : null,
+    };
+  }
+  if (provider === "firecrawl") {
+    const response = await fetch("https://api.firecrawl.dev/v2/team/credit-usage", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    return {
+      httpStatus: response.status,
+      checkedAt,
+      reason: response.ok ? "Key accepted by Firecrawl's free credit-usage endpoint" : `Firecrawl account endpoint returned HTTP ${response.status}`,
+      tavilyUsage: null,
+    };
+  }
+  if (provider === "serpapi") {
+    const response = await fetch(`https://serpapi.com/account.json?api_key=${encodeURIComponent(apiKey)}`);
+    return {
+      httpStatus: response.status,
+      checkedAt,
+      reason: response.ok ? "Key accepted by SerpApi's free Account API" : `SerpApi Account API returned HTTP ${response.status}`,
+      tavilyUsage: null,
+    };
+  }
+  return null;
 }
 
 const filterJobResults = (results: WebResult[]) => results.filter((result) => {
@@ -697,7 +753,7 @@ Deno.serve(async (request: Request) => {
 
   const { data: settingsData, error: settingsError } = await service
     .from("app_settings")
-    .select("discovery_enabled, discovery_time, discovery_timezone, discovery_source_urls, discovery_web_search_enabled, discovery_web_search_configured, discovery_search_queries, discovery_target_role_keywords, discovery_excluded_title_keywords, discovery_max_required_years, discovery_location, discovery_country, discovery_web_search_provider, discovery_provider_order, discovery_monthly_credit_cap, discovery_source_learning_enabled, discovery_learned_sources, last_scheduled_discovery_date")
+    .select("discovery_enabled, discovery_time, discovery_timezone, discovery_source_urls, discovery_web_search_enabled, discovery_web_search_configured, discovery_search_queries, discovery_target_role_keywords, discovery_excluded_title_keywords, discovery_max_required_years, discovery_location, discovery_country, discovery_web_search_provider, discovery_provider_order, discovery_monthly_credit_cap, discovery_source_learning_enabled, discovery_learned_sources, discovery_provider_status, last_scheduled_discovery_date")
     .eq("id", 1)
     .single();
   if (settingsError) return json(request, { error: settingsError.message }, 500);
@@ -714,37 +770,66 @@ Deno.serve(async (request: Request) => {
     .filter((provider, index, order) => DEFAULT_PROVIDER_ORDER.includes(provider) && order.indexOf(provider) === index && Boolean(providerKeys[provider]));
 
   if (action === "diagnostic") {
-    const targetLocation = settings.discovery_location?.trim() || "Singapore";
-    const targetCountry = settings.discovery_country?.trim().toLowerCase() || "singapore";
-    const diagnosticQuery = settings.discovery_search_queries?.[0] || "graduate junior software engineer";
+    const previousStatuses = new Map((settings.discovery_provider_status ?? []).map((item) => [item.provider, item]));
     const diagnostics: ProviderAttempt[] = [];
+    let latestTavilyUsage: { usage: number; limit: number; paygoUsage: number } | null = null;
     for (const provider of DEFAULT_PROVIDER_ORDER) {
       const apiKey = providerKeys[provider];
       if (!apiKey) {
-        diagnostics.push({ provider, status: "skipped", reason: "No saved key", results: 0 });
+        diagnostics.push({ provider, status: "skipped", reason: "No saved key", results: 0, httpStatus: null, checkedAt: new Date().toISOString(), zeroCreditCheck: true });
         continue;
       }
       try {
-        if (provider === "tavily") await fetchTavilyUsage(apiKey);
-        const results = await searchProvider(provider, diagnosticQuery, apiKey, targetLocation, targetCountry);
-        diagnostics.push({ provider, status: "used", reason: "Key accepted and test search completed", results: results.length });
+        const check = await checkProviderWithoutSearch(provider, apiKey);
+        if (!check) {
+          const previous = previousStatuses.get(provider);
+          diagnostics.push({
+            provider,
+            status: previous?.status ?? "skipped",
+            reason: previous?.httpStatus
+              ? "No zero-credit validation endpoint. Showing the most recent real scan response."
+              : "Provider does not publish a zero-credit key validation endpoint.",
+            results: previous?.results ?? 0,
+            httpStatus: previous?.httpStatus ?? null,
+            checkedAt: previous?.checkedAt ?? null,
+            zeroCreditCheck: false,
+          });
+          continue;
+        }
+        if (provider === "tavily" && check.tavilyUsage) latestTavilyUsage = check.tavilyUsage;
+        diagnostics.push({
+          provider,
+          status: check.httpStatus >= 200 && check.httpStatus < 300 ? "used" : "failed",
+          reason: check.reason,
+          results: 0,
+          httpStatus: check.httpStatus,
+          checkedAt: check.checkedAt,
+          zeroCreditCheck: true,
+        });
       } catch (error) {
         diagnostics.push({
           provider,
           status: "failed",
-          reason: error instanceof Error ? error.message : "Provider test failed",
+          reason: error instanceof Error ? error.message : "Provider account check failed",
           results: 0,
+          httpStatus: null,
+          checkedAt: new Date().toISOString(),
+          zeroCreditCheck: true,
         });
       }
     }
     await service.from("app_settings").update({
       discovery_provider_status: diagnostics,
+      ...(latestTavilyUsage ? {
+        discovery_last_credit_usage: latestTavilyUsage.usage,
+        discovery_last_credit_limit: latestTavilyUsage.limit,
+      } : {}),
       updated_at: new Date().toISOString(),
     }).eq("id", 1);
     return json(request, {
       diagnostics,
-      working: diagnostics.filter((item) => item.status === "used").length,
-      configured: diagnostics.filter((item) => item.status !== "skipped").length,
+      checked: diagnostics.filter((item) => item.zeroCreditCheck && item.httpStatus !== null).length,
+      unavailable: diagnostics.filter((item) => !item.zeroCreditCheck).length,
     });
   }
 
@@ -837,6 +922,9 @@ Deno.serve(async (request: Request) => {
           status: "used",
           reason: successfulQueries === webQueries.length ? "All queries completed" : `${successfulQueries} of ${webQueries.length} queries completed`,
           results: searchHits.length,
+          httpStatus: 200,
+          checkedAt: new Date().toISOString(),
+          zeroCreditCheck: false,
         });
         if (provider === "tavily") tavilyUsage = await fetchTavilyUsage(apiKey);
         break;
@@ -846,6 +934,9 @@ Deno.serve(async (request: Request) => {
           status: "failed",
           reason: error instanceof Error ? error.message : `${provider} was unavailable`,
           results: 0,
+          httpStatus: Number((error instanceof Error ? error.message : "").match(/\b([1-5]\d\d)\b/)?.[1]) || null,
+          checkedAt: new Date().toISOString(),
+          zeroCreditCheck: false,
         });
       }
     }
@@ -966,6 +1057,19 @@ Deno.serve(async (request: Request) => {
   const nextDirectSources = [...new Set([...(settings.discovery_source_urls ?? []), ...promotedFeeds])].slice(0, 60);
   const attemptedSources = parsedSources.length + (configuredProviders.length ? 1 : 0);
   const checkedSources = parsedSources.length + (webSearchRan ? 1 : 0);
+  const previousProviderStatuses = new Map((settings.discovery_provider_status ?? []).map((item) => [item.provider, item]));
+  const currentProviderStatuses = new Map(providerAttempts.map((item) => [item.provider, item]));
+  const mergedProviderStatuses = DEFAULT_PROVIDER_ORDER.map((provider) => currentProviderStatuses.get(provider)
+    ?? previousProviderStatuses.get(provider)
+    ?? {
+      provider,
+      status: "skipped" as const,
+      reason: providerKeys[provider] ? "Saved key has not been checked yet" : "No saved key",
+      results: 0,
+      httpStatus: null,
+      checkedAt: null,
+      zeroCreditCheck: false,
+    });
   const status = attemptedSources > 0 && failures.length >= attemptedSources ? "Source error" : "Completed";
   const skipped = uniqueCandidates.length - eligible.length;
   const newlyPromoted = nextDirectSources.length - (settings.discovery_source_urls?.length ?? 0);
@@ -980,7 +1084,7 @@ Deno.serve(async (request: Request) => {
     discovery_last_credit_usage: tavilyUsage?.usage ?? null,
     discovery_last_credit_limit: tavilyUsage?.limit ?? null,
     discovery_last_provider: providerUsed,
-    discovery_provider_status: providerAttempts,
+    discovery_provider_status: mergedProviderStatuses,
     discovery_source_urls: nextDirectSources,
     discovery_learned_sources: learnedSources,
     updated_at: now,
