@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { CSSProperties, FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 const FALLBACK_NOTION_HUB =
@@ -518,6 +518,7 @@ function TurnstileWidget({ siteKey, onToken }: { siteKey: string; onToken: (toke
       const script = document.createElement("script");
       script.id = "cloudflare-turnstile-script";
       script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.nonce = document.body.dataset.cspNonce ?? "";
       script.async = true;
       script.defer = true;
       script.addEventListener("load", renderWidget, { once: true });
@@ -756,9 +757,12 @@ function JobCard({
       </div>
       <div
         className={`score-ring score-${job.match.toLowerCase()}`}
-        style={{ "--match-score": Math.max(0, Math.min(100, job.score)) } as CSSProperties}
         aria-label={`${job.score} percent match`}
       >
+        <svg className="score-ring-progress" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+          <circle className="score-ring-track" cx="32" cy="32" r="28" pathLength="100" />
+          <circle className="score-ring-value" cx="32" cy="32" r="28" pathLength="100" strokeDasharray={`${Math.max(0, Math.min(100, job.score))} 100`} />
+        </svg>
         <strong>{job.score}</strong><span>match</span>
       </div>
     </article>
