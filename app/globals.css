@@ -303,3 +303,37 @@ footer{align-items:center;margin-top:64px;padding:25px 0 6px;font-size:calc(11px
   .select-control{width:100%}
   .select-control:after{right:14px;transform:translateY(-45%) rotate(45deg)}
 }
+
+/* Rebuilt responsive composition for the live dashboard. */
+.welcome-copy{min-width:0}
+.welcome-meta{width:280px;min-width:280px}
+.browser-clock{position:relative;display:block;width:100%;min-width:0;padding:11px 16px 11px 56px}
+.browser-clock::after{display:none;content:none}
+.browser-clock>span{position:absolute;top:50%;left:12px;transform:translateY(-50%)}
+.browser-clock>div{display:flex;align-items:center;text-align:center}
+.browser-clock time{white-space:nowrap}
+.browser-clock small{overflow:visible;width:100%;line-height:1.3;text-overflow:clip;white-space:nowrap}
+.schedule-time-field{width:min(100%,190px)}
+.schedule-time-field input[type="time"]{-webkit-appearance:none;appearance:none;padding-top:0;padding-bottom:0;line-height:42px}
+.schedule-time-field input[type="time"]::-webkit-date-and-time-value{display:flex;height:100%;align-items:center;margin:0;padding:0;line-height:1;text-align:left}
+.salary-card:before{display:none}
+.salary-card{overflow:hidden;border-radius:24px;background:radial-gradient(circle at 100% 0,rgba(155,124,255,.14),transparent 44%),var(--panel)}
+
+@media(max-width:760px){
+  .welcome-section{align-items:stretch;flex-direction:column;gap:20px}
+  .welcome-copy,.welcome-meta{width:100%;min-width:0}
+  .welcome-section h1{font-size:clamp(34px,10vw,44px);line-height:1.08}
+  .subcopy{max-width:38ch;line-height:1.55}
+  .stats-grid{margin-top:22px}
+  .schedule-time-field{width:min(100%,180px)}
+}
+
+@media(max-width:420px){
+  .browser-clock{padding-right:14px;padding-left:56px}
+  .browser-clock time{font-size:calc(19px + var(--text-adjust,0px))}
+  .browser-clock small{font-size:calc(9px + var(--text-adjust,0px))}
+  .stat-card{min-height:128px;padding:15px}
+  .stat-card>strong{margin-top:17px}
+  .salary-card-header{gap:10px}
+  .verified-badge{flex:0 0 auto}
+}

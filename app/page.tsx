@@ -1970,6 +1970,7 @@ export default function Home() {
   const greeting = currentDate.getHours() < 12 ? "Good morning" : currentDate.getHours() < 18 ? "Good afternoon" : "Good evening";
   const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Local time";
   const timeZoneShort = new Intl.DateTimeFormat("en-SG", { timeZoneName: "short" }).formatToParts(currentDate).find((part) => part.type === "timeZoneName")?.value || "";
+  const browserTimeZoneShort = browserTimeZone === "Asia/Singapore" ? "SGT" : timeZoneShort;
   const clockLabel = new Intl.DateTimeFormat("en-SG", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(currentDate);
   const daysToAvailability = profile?.available_from
     ? Math.max(0, Math.ceil((new Date(`${profile.available_from}T00:00:00+08:00`).getTime() - currentDate.getTime()) / 86_400_000))
@@ -2031,7 +2032,7 @@ export default function Home() {
         <div className="content">
           {dataError ? <div className="data-banner" role="alert"><span>!</span><p><strong>Live data needs attention</strong>{dataError}</p><button onClick={loadDashboard}>Retry</button></div> : null}
           <section id="overview" className="welcome-section">
-            <div>
+            <div className="welcome-copy">
               <p className="eyebrow" suppressHydrationWarning>{todayLabel}</p>
               <h1 suppressHydrationWarning>{greeting}, Brian.</h1>
               <p className="subcopy">{dataLoading ? "Refreshing your private workspace..." : `${jobs.length} opportunities tracked. ${strongCount} strong ${strongCount === 1 ? "match is" : "matches are"} ready for review.`}</p>
@@ -2039,7 +2040,7 @@ export default function Home() {
             <div className="welcome-meta">
               <div className="browser-clock" aria-label={`Browser time in ${browserTimeZone}`}>
                 <span aria-hidden="true"><DashboardIcon name="clock" /></span>
-                <div><time suppressHydrationWarning>{clockLabel}</time><small suppressHydrationWarning>{browserTimeZone}{timeZoneShort ? ` · ${timeZoneShort}` : ""}</small></div>
+                <div><time suppressHydrationWarning>{clockLabel}</time><small suppressHydrationWarning>{browserTimeZone}{browserTimeZoneShort ? ` · ${browserTimeZoneShort}` : ""}</small></div>
               </div>
               <div className="secure-chip"><span aria-hidden="true">◉</span> Supabase admin session</div>
             </div>

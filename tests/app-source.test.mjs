@@ -262,6 +262,10 @@ test("keeps mobile controls centered and warns before discarding settings", () =
   assert.match(globalStyles, /\.browser-clock small\{overflow:visible;[^}]*white-space:normal/);
   assert.match(globalStyles, /\.schedule-time-field\{width:min\(100%,190px\)/);
   assert.match(globalStyles, /\.salary-card\{isolation:isolate;overflow:hidden;background-clip:padding-box\}/);
+  assert.match(pageSource, /browserTimeZone === "Asia\/Singapore" \? "SGT"/);
+  assert.match(globalStyles, /\.welcome-section\{align-items:stretch;flex-direction:column/);
+  assert.match(globalStyles, /input\[type="time"\]::\-webkit-date-and-time-value\{display:flex;height:100%;align-items:center/);
+  assert.match(globalStyles, /\.salary-card:before\{display:none\}/);
 });
 
 test("persists the dashboard scout toggle and visibly pauses its radar", () => {
