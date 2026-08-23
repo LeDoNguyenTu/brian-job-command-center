@@ -145,7 +145,7 @@ footer{font-size:calc(10px + var(--text-adjust, 0px))}
 .nav-symbol{width:25px;font-size:calc(21px + var(--text-adjust, 0px));line-height:1}
 .search-box>span{font-size:calc(21px + var(--text-adjust, 0px));line-height:1}
 .icon-button,.avatar{width:46px;height:46px;font-size:calc(20px + var(--text-adjust, 0px))}
-.stat-icon{width:39px;height:39px;border-radius:12px;font-size:calc(19px + var(--text-adjust, 0px))}
+.stat-icon{width:39px;height:39px;flex-basis:39px;border-radius:12px}.stat-icon .dashboard-icon{width:20px;height:20px}
 .pulse-mark{width:42px;height:42px}.pulse-mark span{width:13px;height:13px}
 .scan-core{width:42px;height:42px;font-size:calc(21px + var(--text-adjust, 0px))}
 .save-button{width:36px;height:36px;font-size:calc(20px + var(--text-adjust, 0px));line-height:1}
