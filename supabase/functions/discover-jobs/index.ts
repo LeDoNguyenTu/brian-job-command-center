@@ -66,6 +66,10 @@ type Candidate = {
   atsPlatform: string;
   externalId: string;
   description: string;
+  postedAt: string | null;
+  validThrough: string | null;
+  availability: "verified_open" | "closed" | "unknown";
+  availabilityReason: string;
 };
 
 type GreenhouseJob = {
@@ -74,6 +78,7 @@ type GreenhouseJob = {
   absolute_url?: string;
   content?: string;
   location?: { name?: string };
+  updated_at?: string;
 };
 
 type LeverJob = {
@@ -84,6 +89,7 @@ type LeverJob = {
   descriptionPlain?: string;
   additionalPlain?: string;
   categories?: { location?: string; commitment?: string };
+  createdAt?: number;
 };
 
 type SearchProvider = "tavily" | "exa" | "firecrawl" | "brave" | "serpapi" | "serper";
@@ -144,6 +150,8 @@ type ProviderAttempt = {
 };
 
 const DEFAULT_PROVIDER_ORDER: SearchProvider[] = ["tavily", "exa", "firecrawl", "brave", "serpapi", "serper"];
+const MAX_POSTING_AGE_DAYS = 45;
+const DAY_MS = 86_400_000;
 
 const json = (request: Request, body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: corsHeaders(request) });
@@ -212,6 +220,10 @@ async function fetchGreenhouse(slug: string, sourceUrl: string): Promise<Candida
     atsPlatform: "Greenhouse",
     externalId: String(job.id ?? ""),
     description: stripHtml(String(job.content ?? "")),
+    postedAt: parseDateValue(job.updated_at),
+    validThrough: null,
+    availability: "verified_open",
+    availabilityReason: "Present in the live Greenhouse board feed",
   })).filter((job: Candidate) => job.jobUrl);
 }
 
@@ -233,6 +245,10 @@ async function fetchLever(slug: string, sourceUrl: string): Promise<Candidate[]>
     atsPlatform: "Lever",
     externalId: String(job.id ?? ""),
     description: stripHtml(`${job.descriptionPlain ?? ""} ${job.additionalPlain ?? ""}`),
+    postedAt: typeof job.createdAt === "number" ? new Date(job.createdAt).toISOString() : null,
+    validThrough: null,
+    availability: "verified_open",
+    availabilityReason: "Present in the live Lever board feed",
   })).filter((job: Candidate) => job.jobUrl);
 }
 
@@ -296,6 +312,13 @@ function webResultIdentity(result: WebResult, location: string) {
   let company = "Web opportunity";
   try { company = companyFromSlug(new URL(String(result.url ?? "")).hostname.replace(/^www\./, "").split(".")[0]); } catch { /* keep fallback */ }
   return { position: cleanTitle, company };
+}
+
+function explicitTitleLocation(value: string) {
+  const title = stripHtml(value);
+  const match = title.match(/\b(?:job|vacancy|position)\s+in\s+([^|·]+?)(?:\s*[|·]|$)/i)
+    || title.match(/\blocation\s*[:|-]\s*([^|·]+?)(?:\s*[|·]|$)/i);
+  return match?.[1]?.trim().replace(/\s+(?:job|jobs|careers?)$/i, "") || null;
 }
 
 async function fetchTavilyUsage(apiKey: string) {
@@ -511,6 +534,7 @@ async function fetchFirecrawlSearch(query: string, apiKey: string, location: str
       query: fullJobQuery(query, location),
       limit: 20,
       sources: ["web"],
+      tbs: "qdr:w",
       scrapeOptions: { formats: [{ type: "markdown" }], onlyMainContent: true },
     }),
     signal: AbortSignal.timeout(20_000),
@@ -569,6 +593,131 @@ async function directPageText(url: string) {
   }
 }
 
+function parseDateValue(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return null;
+  const year = new Date(timestamp).getUTCFullYear();
+  if (year < 2000 || year > 2100) return null;
+  return new Date(timestamp).toISOString();
+}
+
+function inferRelativePostedAt(value: string) {
+  const match = value.match(/\b(\d{1,3})\s+(minutes?|hours?|days?|weeks?|months?)\s+ago\b/i);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  const days = unit.startsWith("minute") || unit.startsWith("hour")
+    ? 0
+    : unit.startsWith("day")
+      ? amount
+      : unit.startsWith("week")
+        ? amount * 7
+        : amount * 30;
+  return new Date(Date.now() - days * DAY_MS).toISOString();
+}
+
+function jobPostingMetadata(html: string) {
+  const records: Array<Record<string, unknown>> = [];
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    const type = record["@type"];
+    if ((typeof type === "string" && type.toLowerCase() === "jobposting")
+      || (Array.isArray(type) && type.some((item) => String(item).toLowerCase() === "jobposting"))) records.push(record);
+    Object.values(record).forEach(visit);
+  };
+  for (const match of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try { visit(JSON.parse(match[1].trim())); } catch { /* Ignore malformed third-party metadata. */ }
+  }
+  const posting = records[0];
+  const timeDate = html.match(/<time[^>]+datetime=["']([^"']+)["']/i)?.[1];
+  const metaDate = html.match(/<(?:meta|span)[^>]+(?:itemprop=["']datePosted["']|property=["']article:published_time["'])[^>]+(?:content|datetime)=["']([^"']+)["']/i)?.[1];
+  return {
+    postedAt: parseDateValue(posting?.datePosted) || parseDateValue(metaDate) || parseDateValue(timeDate),
+    validThrough: parseDateValue(posting?.validThrough),
+    hasJobPosting: records.length > 0,
+  };
+}
+
+function closedListingReason(value: string) {
+  const checks: Array<[RegExp, string]> = [
+    [/\b(?:this|the) (?:job|position|vacancy|posting) (?:is|has been) (?:closed|filled|removed|expired|no longer available)\b/i, "Employer says the listing is closed"],
+    [/\b(?:job|position|vacancy|posting) (?:is )?no longer available\b/i, "Employer says the listing is no longer available"],
+    [/\bno longer accepting applications\b/i, "Employer is no longer accepting applications"],
+    [/\bapplications? (?:are|is|have) closed\b/i, "Applications are closed"],
+    [/\bapplications? (?:are|is) no longer being accepted\b/i, "Applications are no longer being accepted"],
+    [/\b(?:job|position|vacancy) (?:was )?not found\b/i, "The vacancy page no longer exists"],
+  ];
+  return checks.find(([pattern]) => pattern.test(value))?.[1] ?? null;
+}
+
+async function inspectWebCandidate(candidate: Candidate): Promise<Candidate> {
+  const snippetClosedReason = closedListingReason(candidate.description);
+  if (snippetClosedReason) return { ...candidate, availability: "closed", availabilityReason: snippetClosedReason };
+  try {
+    const response = await fetch(candidate.jobUrl, {
+      headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "Brian-Job-Command-Center/1.0" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(7_000),
+    });
+    if (response.status === 404 || response.status === 410) {
+      return { ...candidate, availability: "closed", availabilityReason: `Employer page returned HTTP ${response.status}` };
+    }
+    if (!response.ok || !(response.headers.get("content-type") || "").includes("text/html")) {
+      return {
+        ...candidate,
+        postedAt: candidate.postedAt || inferRelativePostedAt(candidate.description),
+        availability: "unknown",
+        availabilityReason: `Employer page could not be verified directly (HTTP ${response.status})`,
+      };
+    }
+    const html = (await response.text()).slice(0, 1_500_000);
+    const text = stripHtml(html).slice(0, 100_000);
+    const metadata = jobPostingMetadata(html);
+    const postedAt = metadata.postedAt || candidate.postedAt || inferRelativePostedAt(candidate.description);
+    if (metadata.validThrough && Date.parse(metadata.validThrough) < Date.now()) {
+      return { ...candidate, postedAt, validThrough: metadata.validThrough, availability: "closed", availabilityReason: "The employer's valid-through date has passed" };
+    }
+    const pageClosedReason = closedListingReason(text);
+    if (pageClosedReason) {
+      return { ...candidate, postedAt, validThrough: metadata.validThrough, availability: "closed", availabilityReason: pageClosedReason };
+    }
+    const hasApplyAction = /\b(?:apply now|apply for this job|submit (?:an )?application|start (?:your )?application)\b/i.test(text);
+    return {
+      ...candidate,
+      description: candidate.description.length >= 300 ? candidate.description : text || candidate.description,
+      postedAt,
+      validThrough: metadata.validThrough,
+      availability: metadata.hasJobPosting || hasApplyAction ? "verified_open" : "unknown",
+      availabilityReason: metadata.hasJobPosting
+        ? "Current JobPosting metadata is present on the employer page"
+        : hasApplyAction
+          ? "The employer page currently offers an application action"
+          : "The employer page loaded but did not expose a reliable open or closed signal",
+    };
+  } catch {
+    return {
+      ...candidate,
+      postedAt: candidate.postedAt || inferRelativePostedAt(candidate.description),
+      availability: "unknown",
+      availabilityReason: "The employer page could not be verified during this scan",
+    };
+  }
+}
+
+async function inspectWebCandidates(candidates: Candidate[]) {
+  const checked: Candidate[] = [];
+  for (let index = 0; index < candidates.length; index += 8) {
+    checked.push(...await Promise.all(candidates.slice(index, index + 8).map(inspectWebCandidate)));
+  }
+  return checked;
+}
+
 async function extractWebResults(results: WebResult[], tavilyKey: string | null, location: string, provider: SearchProvider): Promise<Candidate[]> {
   const extracted = new Map<string, string>();
   const uniqueResults = [...new Map(results.map((result) => [canonicalUrl(String(result.url ?? "")), result])).values()].slice(0, 48);
@@ -607,10 +756,16 @@ async function extractWebResults(results: WebResult[], tavilyKey: string | null,
         || stripHtml(String(result.content ?? ""));
       const locationPattern = new RegExp(`\\b${location.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+")}\\b`, "i");
       const hasLocationEvidence = locationPattern.test(`${result.title ?? ""} ${result.content ?? ""} ${description}`);
+      const titleLocation = explicitTitleLocation(String(result.title ?? ""));
+      const candidateLocation = titleLocation && !locationPattern.test(titleLocation)
+        ? titleLocation
+        : hasLocationEvidence
+          ? location
+          : "Not specified";
       return [{
         company: identity.company,
         position: identity.position,
-        location: hasLocationEvidence ? location : "Not specified",
+        location: candidateLocation,
         employmentType: /\bpart[- ]?time\b/i.test(description) ? "Part-time" : /\bcontract\b/i.test(description) ? "Contract" : /\bintern(?:ship)?\b/i.test(description) ? "Internship" : null,
         jobUrl: jobUrl.toString(),
         careerPage: `${jobUrl.protocol}//${jobUrl.hostname}`,
@@ -618,6 +773,10 @@ async function extractWebResults(results: WebResult[], tavilyKey: string | null,
         atsPlatform: sourceLabel(jobUrl.hostname),
         externalId: canonicalUrl(jobUrl.toString()),
         description,
+        postedAt: inferRelativePostedAt(`${result.content ?? ""} ${description.slice(0, 500)}`),
+        validThrough: null,
+        availability: "unknown",
+        availabilityReason: "Awaiting live employer-page verification",
       }];
     } catch {
       return [];
@@ -722,6 +881,10 @@ function assessEligibility(
   const experienceYears = requiredExperienceYears(text);
   const experiencedLevel = /\bexperience\s*(?:[:|-]\s*)?(?:mid[- ]?level|senior)\b/.test(text);
   const stalePosting = /\b(?:[3-9]|1\d)\s+months?\s+ago\b|\b(?:[1-9]\d*)\s+years?\s+ago\b|\b(?:6\d|[7-9]\d|\d{3,})\s+days?\s+ago\b/.test(text);
+  const postingAgeDays = candidate.postedAt ? Math.floor((Date.now() - Date.parse(candidate.postedAt)) / DAY_MS) : null;
+  if (candidate.availability === "closed") return { eligible: false, reason: "closed or expired listing", experienceYears };
+  if (candidate.validThrough && Date.parse(candidate.validThrough) < Date.now()) return { eligible: false, reason: "closed or expired listing", experienceYears };
+  if (postingAgeDays !== null && postingAgeDays > MAX_POSTING_AGE_DAYS) return { eligible: false, reason: `posted more than ${MAX_POSTING_AGE_DAYS} days ago`, experienceYears };
   if (!targetBased) return { eligible: false, reason: `outside ${targetLocation}`, experienceYears };
   if (!targetRole) return { eligible: false, reason: "outside target roles", experienceYears };
   if (seniorTitle) return { eligible: false, reason: "senior title", experienceYears };
@@ -731,6 +894,13 @@ function assessEligibility(
   if (mandatoryMandarin) return { eligible: false, reason: "mandatory Mandarin", experienceYears };
   if (restrictedResidency) return { eligible: false, reason: "citizenship or PR restriction", experienceYears };
   return { eligible: true, reason: "eligible", experienceYears };
+}
+
+function discoveryPriority(candidate: Candidate) {
+  return {
+    posted: candidate.postedAt ? Date.parse(candidate.postedAt) : 0,
+    availability: candidate.availability === "verified_open" ? 2 : candidate.availability === "unknown" ? 1 : 0,
+  };
 }
 
 function classify(candidate: Candidate) {
@@ -995,7 +1165,7 @@ Deno.serve(async (request: Request) => {
           zeroCreditCheck: false,
         });
         if (provider === "tavily") tavilyUsage = await fetchTavilyUsage(apiKey);
-        const enoughCoverage = providersWithResults >= 1 && eligibleWebCandidates >= 12;
+        const enoughCoverage = providersWithResults >= 2 && eligibleWebCandidates >= 16;
         if (enoughCoverage || successfulProviders >= 3) break;
       } catch (error) {
         providerAttempts.push({
@@ -1016,7 +1186,7 @@ Deno.serve(async (request: Request) => {
   }
 
   const uniqueCandidates = [...new Map(allCandidates.map((candidate) => [canonicalUrl(candidate.jobUrl), candidate])).values()];
-  const assessments = uniqueCandidates.map((candidate) => ({
+  const preliminaryAssessments = uniqueCandidates.map((candidate) => ({
     candidate,
     assessment: assessEligibility(
       candidate,
@@ -1027,11 +1197,55 @@ Deno.serve(async (request: Request) => {
       settings.discovery_excluded_title_keywords ?? [],
     ),
   }));
-  const eligible = assessments.filter(({ assessment }) => assessment.eligible).map(({ candidate }) => candidate);
+  const preliminaryEligible = preliminaryAssessments.filter(({ assessment }) => assessment.eligible).map(({ candidate }) => candidate);
+  const checkedWebCandidates = await inspectWebCandidates(preliminaryEligible.filter((candidate) => /web discovery$/i.test(candidate.source)));
+  const checkedWebByUrl = new Map(checkedWebCandidates.map((candidate) => [canonicalUrl(candidate.jobUrl), candidate]));
+  const availabilityCheckedCandidates = preliminaryEligible.map((candidate) => checkedWebByUrl.get(canonicalUrl(candidate.jobUrl)) ?? candidate);
+  const assessments = [
+    ...preliminaryAssessments.filter(({ assessment }) => !assessment.eligible),
+    ...availabilityCheckedCandidates.map((candidate) => ({
+      candidate,
+      assessment: assessEligibility(
+        candidate,
+        settings.discovery_max_required_years ?? 1,
+        targetLocation,
+        targetCountry,
+        settings.discovery_target_role_keywords ?? [],
+        settings.discovery_excluded_title_keywords ?? [],
+      ),
+    })),
+  ];
+  const eligible = assessments
+    .filter(({ assessment }) => assessment.eligible)
+    .map(({ candidate }) => candidate)
+    .sort((left, right) => {
+      const leftPriority = discoveryPriority(left);
+      const rightPriority = discoveryPriority(right);
+      return rightPriority.posted - leftPriority.posted
+        || rightPriority.availability - leftPriority.availability
+        || classify(right).score - classify(left).score;
+    });
   const skippedByReason = assessments.filter(({ assessment }) => !assessment.eligible).reduce<Record<string, number>>((counts, { assessment }) => {
     counts[assessment.reason] = (counts[assessment.reason] ?? 0) + 1;
     return counts;
   }, {});
+  const retiredReasons = new Map(
+    assessments
+      .filter(({ assessment }) => assessment.reason === "closed or expired listing"
+        || assessment.reason === "stale posting"
+        || assessment.reason.startsWith("posted more than "))
+      .map(({ candidate, assessment }) => [canonicalUrl(candidate.jobUrl), assessment.reason]),
+  );
+  let retiredExisting = 0;
+  for (const [dedupeKey, reason] of retiredReasons) {
+    const { data } = await service.from("jobs").update({
+      pipeline: "Rejected",
+      approved_to_apply: false,
+      gaps_risks: `Automatically retired because the latest scan found a ${reason}.`,
+      last_seen_at: new Date().toISOString(),
+    }).eq("dedupe_key", dedupeKey).eq("pipeline", "Discovered").select("id");
+    retiredExisting += data?.length ?? 0;
+  }
   const keys = eligible.map((candidate) => canonicalUrl(candidate.jobUrl));
   const existingKeys = new Set<string>();
   for (let index = 0; index < keys.length; index += 200) {
@@ -1051,9 +1265,11 @@ Deno.serve(async (request: Request) => {
       sponsorship: "Unknown",
       location: candidate.location,
       work_mode: /remote/i.test(candidate.description) ? "Remote" : /hybrid/i.test(candidate.description) ? "Hybrid" : "Not specified",
-      date_found: new Date().toISOString().slice(0, 10),
+      date_found: candidate.postedAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
       matched_skills: match.skills,
-      gaps_risks: "Confirm role requirements, salary, and employer sponsorship before applying.",
+      gaps_risks: candidate.availability === "verified_open"
+        ? `Availability checked: ${candidate.availabilityReason}. Confirm salary and employer sponsorship before applying.`
+        : `Availability could not be independently confirmed: ${candidate.availabilityReason}. Open the listing before preparing the application.`,
       pipeline: "Discovered",
       approved_to_apply: false,
       employment_type: candidate.employmentType,
@@ -1086,6 +1302,7 @@ Deno.serve(async (request: Request) => {
       ats_platform: candidate.atsPlatform,
       source_external_id: candidate.externalId,
       job_description: candidate.description || null,
+      ...(candidate.postedAt ? { date_found: candidate.postedAt.slice(0, 10) } : {}),
       last_seen_at: new Date().toISOString(),
     }).eq("dedupe_key", canonicalUrl(candidate.jobUrl))));
   const refreshed = refreshResults.filter((result) => !result.error).length;
@@ -1141,8 +1358,12 @@ Deno.serve(async (request: Request) => {
     });
   const status = attemptedSources > 0 && failures.length >= attemptedSources ? "Source error" : "Completed";
   const skipped = uniqueCandidates.length - eligible.length;
+  const verifiedOpen = eligible.filter((candidate) => candidate.availability === "verified_open").length;
+  const availabilityUnknown = eligible.filter((candidate) => candidate.availability === "unknown").length;
+  const closedSkipped = assessments.filter(({ assessment }) => assessment.reason === "closed or expired listing").length;
   const newlyPromoted = nextDirectSources.length - (settings.discovery_source_urls?.length ?? 0);
-  const message = `Scan completed: ${inserted} new, ${eligible.length - inserted} matching listings refreshed or already tracked. Reviewed ${uniqueCandidates.length} unique listings, including ${webCandidates.length} web candidates from ${rawWebHits} raw web hits; ${skipped} did not meet the active filters. ${checkedSources} source type${checkedSources === 1 ? "" : "s"} checked.`
+  const message = `Scan completed: ${inserted} new, ${eligible.length - inserted} matching listings refreshed or already tracked. Reviewed ${uniqueCandidates.length} unique listings, including ${webCandidates.length} web candidates from ${rawWebHits} raw web hits; ${skipped} did not meet the active filters. Availability was confirmed for ${verifiedOpen} matching listings, ${availabilityUnknown} could not be independently confirmed, and ${closedSkipped} closed or expired listings were blocked. ${checkedSources} source type${checkedSources === 1 ? "" : "s"} checked.`
+    + (retiredExisting > 0 ? ` ${retiredExisting} previously discovered stale or closed listing${retiredExisting === 1 ? " was" : "s were"} moved to Rejected.` : "")
     + (newlyPromoted > 0 ? ` ${newlyPromoted} reusable direct feed${newlyPromoted === 1 ? "" : "s"} learned from 80+ matches.` : "")
     + (failures.length ? ` ${failures.length} source${failures.length === 1 ? "" : "s"} need attention.` : "");
   await service.from("app_settings").update({
@@ -1180,9 +1401,13 @@ Deno.serve(async (request: Request) => {
       newListings: inserted,
       duplicates: eligible.length - inserted,
       filteredOut: skipped,
+      verifiedOpen,
+      availabilityUnknown,
+      closedOrExpired: closedSkipped,
     },
     learnedSources: learnedSources.length,
     promotedSources: newlyPromoted,
+    retiredExisting,
     targetLocation,
     tavilyUsage,
     skipped,
