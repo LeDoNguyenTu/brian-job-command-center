@@ -12,3 +12,5 @@ comment on column public.app_settings.discovery_source_learning_enabled is
 
 comment on column public.app_settings.discovery_learned_sources is
   'Bounded source-quality summaries. Reusable Greenhouse and Lever roots are promoted into discovery_source_urls; other ATS hosts remain web-monitored.';
+
+-- This migration is intentionally idempotent for existing production projects.
