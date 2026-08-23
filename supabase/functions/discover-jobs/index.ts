@@ -273,6 +273,18 @@ const isIndividualJobResult = (url: URL, title: string) => {
 
 function webResultIdentity(result: WebResult, location: string) {
   const rawTitle = stripHtml(String(result.title ?? "Untitled role"));
+  try {
+    const jobUrl = new URL(String(result.url ?? ""));
+    if (jobUrl.hostname.toLowerCase().includes("linkedin.com") && jobUrl.pathname.includes("/jobs/view/")) {
+      const slug = decodeURIComponent(jobUrl.pathname.split("/jobs/view/")[1] ?? "").replace(/-\d+\/?$/, "");
+      const companyMarker = slug.lastIndexOf("-at-");
+      if (companyMarker > 0) {
+        const position = companyFromSlug(slug.slice(0, companyMarker)).replace(/\s+[–—]\s+.*$/, "").trim();
+        const company = companyFromSlug(slug.slice(companyMarker + 4)).trim();
+        if (position && company) return { position, company };
+      }
+    }
+  } catch { /* use the result title fallback */ }
   const linkedIn = rawTitle.match(new RegExp(`^(.+?)\\s+hiring\\s+(.+?)\\s+in\\s+${location.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i"));
   if (linkedIn) return { company: linkedIn[1].trim(), position: linkedIn[2].trim() };
 
@@ -708,10 +720,14 @@ function assessEligibility(
     || /(?:no|without)\s+(?:visa\s+)?sponsorship|unable to sponsor|will not sponsor/.test(text);
   const targetBased = isTargetLocation(candidate, targetLocation, targetCountry);
   const experienceYears = requiredExperienceYears(text);
+  const experiencedLevel = /\bexperience\s*(?:[:|-]\s*)?(?:mid[- ]?level|senior)\b/.test(text);
+  const stalePosting = /\b(?:[3-9]|1\d)\s+months?\s+ago\b|\b(?:[1-9]\d*)\s+years?\s+ago\b|\b(?:6\d|[7-9]\d|\d{3,})\s+days?\s+ago\b/.test(text);
   if (!targetBased) return { eligible: false, reason: `outside ${targetLocation}`, experienceYears };
   if (!targetRole) return { eligible: false, reason: "outside target roles", experienceYears };
   if (seniorTitle) return { eligible: false, reason: "senior title", experienceYears };
+  if (experiencedLevel) return { eligible: false, reason: "mid-level or senior experience", experienceYears };
   if (experienceYears > maxRequiredYears) return { eligible: false, reason: `requires ${experienceYears}+ years`, experienceYears };
+  if (stalePosting) return { eligible: false, reason: "stale posting", experienceYears };
   if (mandatoryMandarin) return { eligible: false, reason: "mandatory Mandarin", experienceYears };
   if (restrictedResidency) return { eligible: false, reason: "citizenship or PR restriction", experienceYears };
   return { eligible: true, reason: "eligible", experienceYears };
