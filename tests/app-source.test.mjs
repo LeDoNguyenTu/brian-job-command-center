@@ -123,7 +123,7 @@ test("combines web-wide discovery with strict fresh-graduate filtering", () => {
   assert.match(discoverySource, /slice\(0, 10\)/);
   assert.match(discoverySource, /interleaveUniqueResults/);
   assert.match(discoverySource, /provider !== "exa" && provider !== "firecrawl"/);
-  assert.match(discoverySource, /providersWithResults >= 1 && eligibleWebCandidates >= 12/);
+  assert.match(discoverySource, /providersWithResults >= 2 && eligibleWebCandidates >= 16/);
   assert.match(discoverySource, /successfulProviders >= 3/);
   assert.match(discoverySource, /AbortSignal\.timeout\(20_000\)/);
   assert.match(discoverySource, /missingContent\.length \/ 8/);
@@ -140,6 +140,19 @@ test("combines web-wide discovery with strict fresh-graduate filtering", () => {
   assert.match(discoverySource, /outside target roles/);
   assert.match(discoverySource, /mid-level or senior experience/);
   assert.match(discoverySource, /stale posting/);
+  assert.match(discoverySource, /function closedListingReason/);
+  assert.match(discoverySource, /function jobPostingMetadata/);
+  assert.match(discoverySource, /inspectWebCandidates/);
+  assert.match(discoverySource, /function explicitTitleLocation/);
+  assert.match(discoverySource, /titleLocation && !locationPattern\.test\(titleLocation\)/);
+  assert.match(discoverySource, /response\.status === 404 \|\| response\.status === 410/);
+  assert.match(discoverySource, /no longer accepting applications/);
+  assert.match(discoverySource, /validThrough/);
+  assert.match(discoverySource, /MAX_POSTING_AGE_DAYS = 45/);
+  assert.match(discoverySource, /candidate\.postedAt\?\.slice\(0, 10\)/);
+  assert.match(discoverySource, /availability was confirmed/i);
+  assert.match(discoverySource, /retiredExisting/);
+  assert.equal((discoverySource.match(/tbs: "qdr:w"/g) ?? []).length, 3);
   assert.match(discoverySource, /jobUrl\.pathname\.includes\("\/jobs\/view\/"\)/);
   assert.match(discoverySource, /discovery_max_required_years/);
   assert.match(discoverySource, /isIndividualJobResult/);
