@@ -37,7 +37,21 @@ type DiscoverySettings = {
   discovery_web_search_provider: "automatic" | SearchProvider;
   discovery_provider_order: SearchProvider[];
   discovery_monthly_credit_cap: number;
+  discovery_source_learning_enabled: boolean;
+  discovery_learned_sources: LearnedSource[];
   last_scheduled_discovery_date: string | null;
+};
+
+type LearnedSource = {
+  host: string;
+  company: string;
+  atsPlatform: string;
+  bestScore: number;
+  matches: number;
+  lastSeen: string;
+  feedUrl: string | null;
+  promoted: boolean;
+  jobUrls?: string[];
 };
 
 type Candidate = {
@@ -160,6 +174,19 @@ function parseSource(source: string) {
   } catch {
     return null;
   }
+  return null;
+}
+
+function repeatableFeed(jobUrl: string) {
+  try {
+    const url = new URL(jobUrl);
+    const slug = url.pathname.split("/").filter(Boolean)[0];
+    if (!slug) return null;
+    if (["boards.greenhouse.io", "job-boards.greenhouse.io", "boards.eu.greenhouse.io"].includes(url.hostname)) {
+      return `https://${url.hostname}/${slug}`;
+    }
+    if (url.hostname === "jobs.lever.co") return `https://jobs.lever.co/${slug}`;
+  } catch { /* keep as non-repeatable */ }
   return null;
 }
 
@@ -483,10 +510,12 @@ async function extractWebResults(results: WebResult[], tavilyKey: string | null,
       const description = stripHtml(String(result.raw_content ?? ""))
         || extracted.get(canonicalUrl(jobUrl.toString()))
         || stripHtml(String(result.content ?? ""));
+      const locationPattern = new RegExp(`\\b${location.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+")}\\b`, "i");
+      const hasLocationEvidence = locationPattern.test(`${result.title ?? ""} ${result.content ?? ""} ${description}`);
       return [{
         company: identity.company,
         position: identity.position,
-        location,
+        location: hasLocationEvidence ? location : "Not specified",
         employmentType: /\bpart[- ]?time\b/i.test(description) ? "Part-time" : /\bcontract\b/i.test(description) ? "Contract" : /\bintern(?:ship)?\b/i.test(description) ? "Internship" : null,
         jobUrl: jobUrl.toString(),
         careerPage: `${jobUrl.protocol}//${jobUrl.hostname}`,
@@ -558,8 +587,8 @@ const countryLocationAliases: Record<string, string[]> = {
 };
 
 function isTargetLocation(candidate: Candidate, targetLocation: string, targetCountry: string) {
-  if (/\bremote\b/i.test(targetLocation)) return /\bremote\b/i.test(`${candidate.location} ${candidate.description}`);
-  const locationText = `${candidate.location} ${candidate.description}`.toLowerCase();
+  if (/\bremote\b/i.test(targetLocation)) return /\bremote\b/i.test(candidate.location);
+  const locationText = candidate.location.toLowerCase();
   const terms = [targetLocation.toLowerCase(), ...(countryLocationAliases[targetCountry.toLowerCase()] ?? [targetCountry.toLowerCase()])]
     .map((term) => term.trim())
     .filter((term) => term.length >= 2);
@@ -668,7 +697,7 @@ Deno.serve(async (request: Request) => {
 
   const { data: settingsData, error: settingsError } = await service
     .from("app_settings")
-    .select("discovery_enabled, discovery_time, discovery_timezone, discovery_source_urls, discovery_web_search_enabled, discovery_web_search_configured, discovery_search_queries, discovery_target_role_keywords, discovery_excluded_title_keywords, discovery_max_required_years, discovery_location, discovery_country, discovery_web_search_provider, discovery_provider_order, discovery_monthly_credit_cap, last_scheduled_discovery_date")
+    .select("discovery_enabled, discovery_time, discovery_timezone, discovery_source_urls, discovery_web_search_enabled, discovery_web_search_configured, discovery_search_queries, discovery_target_role_keywords, discovery_excluded_title_keywords, discovery_max_required_years, discovery_location, discovery_country, discovery_web_search_provider, discovery_provider_order, discovery_monthly_credit_cap, discovery_source_learning_enabled, discovery_learned_sources, last_scheduled_discovery_date")
     .eq("id", 1)
     .single();
   if (settingsError) return json(request, { error: settingsError.message }, 500);
@@ -902,11 +931,46 @@ Deno.serve(async (request: Request) => {
   const refreshed = refreshResults.filter((result) => !result.error).length;
 
   const now = new Date().toISOString();
+  const learnedSourceMap = new Map<string, LearnedSource>();
+  for (const source of settings.discovery_learned_sources ?? []) {
+    if (source?.host && source?.company) learnedSourceMap.set(`${source.host}|${source.company}`.toLowerCase(), source);
+  }
+  const promotedFeeds = new Set<string>();
+  if (settings.discovery_source_learning_enabled !== false) {
+    for (const candidate of eligible.filter((item) => /web discovery$/i.test(item.source))) {
+      const match = classify(candidate);
+      if (match.score < 80) continue;
+      let host = "";
+      try { host = new URL(candidate.jobUrl).hostname.replace(/^www\./, ""); } catch { continue; }
+      const key = `${host}|${candidate.company}`.toLowerCase();
+      const previous = learnedSourceMap.get(key);
+      const jobUrls = [...new Set([...(previous?.jobUrls ?? []), canonicalUrl(candidate.jobUrl)])].slice(-8);
+      const feedUrl = repeatableFeed(candidate.jobUrl) || previous?.feedUrl || null;
+      if (feedUrl) promotedFeeds.add(feedUrl);
+      learnedSourceMap.set(key, {
+        host,
+        company: candidate.company,
+        atsPlatform: candidate.atsPlatform,
+        bestScore: Math.max(previous?.bestScore ?? 0, match.score),
+        matches: jobUrls.length,
+        lastSeen: now,
+        feedUrl,
+        promoted: Boolean(feedUrl),
+        jobUrls,
+      });
+    }
+  }
+  const learnedSources = [...learnedSourceMap.values()]
+    .sort((left, right) => right.bestScore - left.bestScore || right.lastSeen.localeCompare(left.lastSeen))
+    .slice(0, 40);
+  const nextDirectSources = [...new Set([...(settings.discovery_source_urls ?? []), ...promotedFeeds])].slice(0, 60);
   const attemptedSources = parsedSources.length + (configuredProviders.length ? 1 : 0);
   const checkedSources = parsedSources.length + (webSearchRan ? 1 : 0);
   const status = attemptedSources > 0 && failures.length >= attemptedSources ? "Source error" : "Completed";
   const skipped = uniqueCandidates.length - eligible.length;
+  const newlyPromoted = nextDirectSources.length - (settings.discovery_source_urls?.length ?? 0);
   const message = `${inserted} new, ${eligible.length - inserted} already tracked or repeated, ${skipped} unsuitable skipped. ${checkedSources} source type${checkedSources === 1 ? "" : "s"} checked.`
+    + (newlyPromoted > 0 ? ` ${newlyPromoted} reusable direct feed${newlyPromoted === 1 ? "" : "s"} learned from 80+ matches.` : "")
     + (failures.length ? ` ${failures.length} source${failures.length === 1 ? "" : "s"} need attention.` : "");
   await service.from("app_settings").update({
     last_discovery_at: now,
@@ -917,6 +981,8 @@ Deno.serve(async (request: Request) => {
     discovery_last_credit_limit: tavilyUsage?.limit ?? null,
     discovery_last_provider: providerUsed,
     discovery_provider_status: providerAttempts,
+    discovery_source_urls: nextDirectSources,
+    discovery_learned_sources: learnedSources,
     updated_at: now,
   }).eq("id", 1);
 
@@ -931,6 +997,8 @@ Deno.serve(async (request: Request) => {
     webSearchProvider: providerUsed,
     webSearchRan,
     providerAttempts,
+    learnedSources: learnedSources.length,
+    promotedSources: newlyPromoted,
     targetLocation,
     tavilyUsage,
     skipped,

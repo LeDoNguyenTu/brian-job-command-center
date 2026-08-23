@@ -12,6 +12,7 @@ const webDiscoveryMigration = await readFile(new URL("../supabase/migrations/202
 const tavilyMigration = await readFile(new URL("../supabase/migrations/20260823004500_configurable_tavily_job_discovery.sql", import.meta.url), "utf8");
 const providerPoolMigration = await readFile(new URL("../supabase/migrations/20260823020000_multi_provider_search_failover.sql", import.meta.url), "utf8");
 const resumeCriteriaMigration = await readFile(new URL("../supabase/migrations/20260823030000_resume_library_and_scout_criteria.sql", import.meta.url), "utf8");
+const sourceLearningMigration = await readFile(new URL("../supabase/migrations/20260823040000_learn_strong_web_sources.sql", import.meta.url), "utf8");
 const resumeCriteriaRoute = await readFile(new URL("../app/api/resume-criteria/route.ts", import.meta.url), "utf8");
 
 function luminance(hex) {
@@ -151,6 +152,29 @@ test("supports accept, applied, and reject decisions with filters", () => {
   assert.match(pageSource, /Open LinkedIn/);
   assert.match(pageSource, /Open Indeed/);
   assert.match(globalStyles, /\.decision-actions\{/);
+});
+
+test("prepares verified application answers without submitting employer forms", () => {
+  assert.match(pageSource, /buildApplicationAnswers/);
+  assert.match(pageSource, /Ready-to-paste answers/);
+  assert.match(pageSource, /Open listing \+ copy pack/);
+  assert.match(pageSource, /Visa sponsorship required/);
+  assert.match(pageSource, /Check the employer sector and application date against the current MOM S Pass table/);
+  assert.match(pageSource, /It never fills declarations, solves CAPTCHA, signs in, or submits an application/);
+  assert.match(globalStyles, /\.application-answer-list/);
+  assert.match(globalStyles, /@media\(max-width:520px\).*\.application-pack-actions\{grid-template-columns:1fr\}/s);
+});
+
+test("learns reusable direct feeds only from strong web matches", () => {
+  assert.match(sourceLearningMigration, /discovery_source_learning_enabled/);
+  assert.match(sourceLearningMigration, /discovery_learned_sources/);
+  assert.match(discoverySource, /match\.score < 80/);
+  assert.match(discoverySource, /repeatableFeed/);
+  assert.match(discoverySource, /reusable direct feed/);
+  assert.match(pageSource, /Learn reusable sources from strong web matches/);
+  assert.match(pageSource, /direct feed added/);
+  assert.match(discoverySource, /const locationText = candidate\.location\.toLowerCase\(\)/);
+  assert.doesNotMatch(discoverySource, /const locationText = `\$\{candidate\.location\} \$\{candidate\.description\}`/);
 });
 
 test("keeps multiple private resume formats and requires criteria approval", () => {

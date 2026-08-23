@@ -57,6 +57,17 @@ type DiscoveryCriteriaSuggestion = {
   rationale: string;
 };
 
+type LearnedDiscoverySource = {
+  host: string;
+  company: string;
+  atsPlatform: string;
+  bestScore: number;
+  matches: number;
+  lastSeen: string;
+  feedUrl: string | null;
+  promoted: boolean;
+};
+
 type PrivateProfile = {
   full_name: string;
   preferred_name: string;
@@ -112,6 +123,8 @@ type AppSettings = {
   discovery_monthly_credit_cap?: number;
   discovery_last_credit_usage?: number | null;
   discovery_last_credit_limit?: number | null;
+  discovery_source_learning_enabled?: boolean;
+  discovery_learned_sources?: LearnedDiscoverySource[];
   last_discovery_at?: string | null;
   last_scheduled_discovery_date?: string | null;
   discovery_status?: string;
@@ -233,6 +246,15 @@ type ResumeSuggestion = {
   guidance: string;
 };
 
+type ApplicationAnswer = {
+  id: string;
+  category: "Identity" | "Eligibility" | "Role-specific" | "Manual check";
+  label: string;
+  value: string;
+  ready: boolean;
+  note?: string;
+};
+
 const EMPTY_JOB: JobDraft = {
   company: "",
   position: "",
@@ -258,6 +280,45 @@ const EMPTY_JOB: JobDraft = {
   salary: "",
   job_description: "",
 };
+
+function buildApplicationAnswers(
+  job: Job,
+  profile: PrivateProfile | null,
+  email: string,
+  suggestion: ResumeSuggestion | null,
+): ApplicationAnswer[] {
+  const matchedSkills = job.tags.slice(0, 8);
+  const fitAnswer = [
+    "I am completing a BSc in Computer Science / Cybersecurity & Forensics at Murdoch University on 31 August 2026.",
+    matchedSkills.length
+      ? `My verified project experience aligns with this role through ${matchedSkills.join(", ")}.`
+      : "My verified project work covers software development, APIs, testing, databases, CI/CD, and secure cloud or serverless design.",
+    `I am interested in the ${job.role} opportunity at ${job.company} and am available from ${formatLongDate(profile?.available_from)}.`,
+  ].join(" ");
+
+  return [
+    { id: "legal-name", category: "Identity", label: "Legal name", value: profile?.full_name || "", ready: Boolean(profile?.full_name) },
+    { id: "preferred-name", category: "Identity", label: "Preferred name", value: profile?.preferred_name || "", ready: Boolean(profile?.preferred_name) },
+    { id: "email", category: "Identity", label: "Email address", value: email, ready: Boolean(email) },
+    { id: "phone", category: "Manual check", label: "Phone number", value: "Add your current phone number in the employer form", ready: false, note: "No verified phone number is stored." },
+    { id: "dob", category: "Identity", label: "Date of birth", value: formatLongDate(profile?.date_of_birth), ready: Boolean(profile?.date_of_birth) },
+    { id: "nationality", category: "Identity", label: "Nationality", value: profile?.nationality || "", ready: Boolean(profile?.nationality) },
+    { id: "location", category: "Identity", label: "Current location", value: profile?.location || "", ready: Boolean(profile?.location) },
+    { id: "work-status", category: "Eligibility", label: "Current Singapore status", value: profile?.current_pass ? `${profile.current_pass}, expiring ${formatLongDate(profile.pass_expiry)}` : "", ready: Boolean(profile?.current_pass && profile?.pass_expiry) },
+    { id: "sponsorship", category: "Eligibility", label: "Visa sponsorship required", value: profile?.sponsorship_required ? "Yes. Employer visa sponsorship is required for Singapore employment." : "No", ready: profile !== null },
+    { id: "availability", category: "Eligibility", label: "Earliest start date", value: formatLongDate(profile?.available_from), ready: Boolean(profile?.available_from) },
+    { id: "employment", category: "Eligibility", label: "Current employment", value: "Not employed", ready: true },
+    { id: "notice", category: "Eligibility", label: "Notice period", value: "None", ready: true },
+    { id: "languages", category: "Eligibility", label: "Languages", value: profile?.languages.join(", ") || "", ready: Boolean(profile?.languages.length), note: "Do not claim Mandarin proficiency." },
+    { id: "position", category: "Role-specific", label: "Position applied for", value: job.role, ready: true },
+    { id: "company", category: "Role-specific", label: "Employer", value: job.company, ready: true },
+    { id: "job-location", category: "Role-specific", label: "Job location", value: job.location, ready: true },
+    { id: "resume", category: "Role-specific", label: "Recommended resume", value: suggestion ? `${suggestion.name} (${suggestion.code})` : "Select a resume", ready: Boolean(suggestion) },
+    { id: "fit", category: "Role-specific", label: "Why are you suitable?", value: fitAnswer, ready: true, note: "Review wording before pasting into a long-answer field." },
+    { id: "salary", category: "Manual check", label: "Expected salary", value: "Check the employer sector and application date against the current MOM S Pass table before answering.", ready: false, note: "The correct minimum differs for financial services and changes from 1 January 2027." },
+    { id: "declarations", category: "Manual check", label: "Declarations and consent", value: "Answer personally in the employer form", ready: false, note: "Never pre-accept legal declarations." },
+  ];
+}
 
 function initials(company: string) {
   return company
@@ -721,6 +782,7 @@ export default function Home() {
   const [maxRequiredYears, setMaxRequiredYears] = useState(1);
   const [discoveryLocation, setDiscoveryLocation] = useState("Singapore");
   const [discoveryCountry, setDiscoveryCountry] = useState("singapore");
+  const [sourceLearningEnabled, setSourceLearningEnabled] = useState(true);
   const [decisionBusyId, setDecisionBusyId] = useState<number | null>(null);
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [scoutToggleBusy, setScoutToggleBusy] = useState(false);
@@ -737,6 +799,7 @@ export default function Home() {
   const [documentBusy, setDocumentBusy] = useState(false);
   const [documentMessage, setDocumentMessage] = useState("");
   const [promptCopied, setPromptCopied] = useState(false);
+  const [copiedApplicationField, setCopiedApplicationField] = useState("");
   const [passkeys, setPasskeys] = useState<Array<{ id: string; friendly_name?: string; created_at: string }>>([]);
   const [jobEditorOpen, setJobEditorOpen] = useState(false);
   const [jobDraft, setJobDraft] = useState<JobDraft>(EMPTY_JOB);
@@ -800,6 +863,7 @@ export default function Home() {
       setMaxRequiredYears(nextSettings.discovery_max_required_years ?? 1);
       setDiscoveryLocation(nextSettings.discovery_location || "Singapore");
       setDiscoveryCountry(nextSettings.discovery_country || "singapore");
+      setSourceLearningEnabled(nextSettings.discovery_source_learning_enabled ?? true);
       setDocumentProvider(nextSettings.document_provider || "gemini");
       setDocumentModel(nextSettings.document_model || "gemini-3.6-flash");
       setDocumentEndpoint(nextSettings.document_endpoint || "");
@@ -958,6 +1022,7 @@ export default function Home() {
     setDocumentConsent(false);
     setDocumentMessage("");
     setPromptCopied(false);
+    setCopiedApplicationField("");
     setSelectedJob(job);
   };
 
@@ -1004,6 +1069,34 @@ export default function Home() {
     await navigator.clipboard.writeText(`S$${salary.toLocaleString()} fixed monthly salary`);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  const copyApplicationValue = async (answer: ApplicationAnswer) => {
+    if (!answer.ready) return;
+    await navigator.clipboard.writeText(answer.value);
+    setCopiedApplicationField(answer.id);
+    window.setTimeout(() => setCopiedApplicationField((current) => current === answer.id ? "" : current), 1600);
+  };
+
+  const copyApplicationPack = async (answers: ApplicationAnswer[]) => {
+    const ready = answers.filter((answer) => answer.ready && answer.value);
+    const manual = answers.filter((answer) => !answer.ready);
+    const pack = [
+      "APPLICATION COPY PACK",
+      ...ready.map((answer) => `${answer.label}: ${answer.value}`),
+      "",
+      "CHECK MANUALLY",
+      ...manual.map((answer) => `${answer.label}: ${answer.value}`),
+    ].join("\n");
+    await navigator.clipboard.writeText(pack);
+    setCopiedApplicationField("all");
+    window.setTimeout(() => setCopiedApplicationField((current) => current === "all" ? "" : current), 1600);
+  };
+
+  const openJobWithApplicationPack = (job: Job, answers: ApplicationAnswer[]) => {
+    if (!job.jobUrl) return;
+    window.open(job.jobUrl, "_blank", "noopener,noreferrer");
+    void copyApplicationPack(answers);
   };
 
   const refreshPasskeys = async () => {
@@ -1239,6 +1332,7 @@ export default function Home() {
       discovery_max_required_years: maxRequiredYears,
       discovery_location: discoveryLocation.trim(),
       discovery_country: discoveryCountry,
+      discovery_source_learning_enabled: sourceLearningEnabled,
       discovery_web_search_provider: "automatic",
       discovery_monthly_credit_cap: 900,
       discovery_status: stateCopy.status,
@@ -1796,6 +1890,10 @@ export default function Home() {
   const indeedJobSearch = `https://www.indeed.com/jobs?q=${encodeURIComponent(jobSearchKeywords)}&l=${encodeURIComponent(discoveryLocation)}&fromage=7`;
   const selectedSuggestion = selectedJob ? suggestResume(selectedJob, resumes) : null;
   const selectedResume = resumes.find((resume) => resume.code === documentResumeCode);
+  const applicationAnswers = selectedJob
+    ? buildApplicationAnswers(selectedJob, profile, currentUserEmail, selectedSuggestion)
+    : [];
+  const readyApplicationAnswers = applicationAnswers.filter((answer) => answer.ready).length;
 
   return (
     <main className={`${dark ? "app-shell dark" : "app-shell light"} text-size-${textSize}`}>
@@ -2061,6 +2159,28 @@ export default function Home() {
                 {generatedDocuments.map((document) => <button key={document.id} onClick={() => downloadGeneratedDocument(document)}><span>{document.document_type === "resume" ? "Resume" : "Cover letter"}</span><small>{document.source_resume_code} - {new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short" }).format(new Date(document.created_at))}</small><strong>Download ↓</strong></button>)}
               </div> : null}
             </section>
+            <section className="application-assistant" aria-labelledby="application-assistant-title">
+              <div className="application-assistant-heading">
+                <div><p>APPLICATION ASSISTANT</p><h3 id="application-assistant-title">Ready-to-paste answers</h3></div>
+                <span>{readyApplicationAnswers} ready · {applicationAnswers.length - readyApplicationAnswers} manual</span>
+              </div>
+              <p className="application-assistant-copy">Prepared for {selectedJob.atsPlatform || "this employer portal"} from your verified profile and this job record. Review long answers and eligibility fields before pasting.</p>
+              <div className="application-answer-list">
+                {applicationAnswers.map((answer) => (
+                  <article key={answer.id} className={answer.ready ? "application-answer" : "application-answer manual"}>
+                    <div className="application-answer-title"><span>{answer.category}</span><strong>{answer.label}</strong></div>
+                    <p>{answer.value || "Missing from your verified profile"}</p>
+                    {answer.note ? <small>{answer.note}</small> : null}
+                    {answer.ready ? <button type="button" onClick={() => void copyApplicationValue(answer)}>{copiedApplicationField === answer.id ? "Copied" : "Copy"}</button> : <span className="manual-badge">Check manually</span>}
+                  </article>
+                ))}
+              </div>
+              <div className="application-pack-actions">
+                <button type="button" className="secondary-button" onClick={() => void copyApplicationPack(applicationAnswers)}>{copiedApplicationField === "all" ? "Application pack copied" : "Copy all answers"}</button>
+                {selectedJob.jobUrl ? <button type="button" className="primary-button" onClick={() => openJobWithApplicationPack(selectedJob, applicationAnswers)}>Open listing + copy pack ↗</button> : null}
+              </div>
+              <p className="application-safety-note">This prepares answers only. It never fills declarations, solves CAPTCHA, signs in, or submits an application.</p>
+            </section>
             <div className="modal-actions">
               <button className="primary-button" onClick={() => openJobEditor(selectedJob)}>Edit in dashboard</button>
               {selectedJob.jobUrl ? <a className="secondary-button" href={selectedJob.jobUrl} target="_blank" rel="noreferrer">Open job listing ↗</a> : null}
@@ -2224,7 +2344,9 @@ export default function Home() {
                   <div className="criteria-proposal-actions"><button type="button" className="secondary-button" onClick={() => reviewCriteriaSuggestion("rejected")} disabled={discoveryBusy}>Keep current criteria</button><button type="button" className="primary-button compact" onClick={() => reviewCriteriaSuggestion("approved")} disabled={discoveryBusy}>Approve new criteria</button></div>
                 </article> : null}
                 <div className="personal-job-links"><div><strong>Personal job-board searches for {discoveryLocation}</strong><small>These open in your browser and use your existing login. The dashboard never stores your LinkedIn or Indeed password.</small></div><a className="secondary-button" href={linkedInJobSearch} target="_blank" rel="noreferrer">Open LinkedIn ↗</a><a className="secondary-button" href={indeedJobSearch} target="_blank" rel="noreferrer">Open Indeed ↗</a></div>
-                <label><span>Optional direct Greenhouse or Lever feeds</span><textarea rows={5} value={discoverySources} onChange={(event) => setDiscoverySources(event.target.value)} placeholder={"https://boards.greenhouse.io/company\nhttps://jobs.lever.co/company"} /><small>These reliable feeds supplement the provider pool. Workday and other career systems are discovered automatically, so they do not need to be listed here.</small></label>
+                <label className="checkbox-field discovery-toggle"><input type="checkbox" checked={sourceLearningEnabled} onChange={(event) => setSourceLearningEnabled(event.target.checked)} /><span>Learn reusable sources from strong web matches</span></label>
+                <label><span>Reliable direct Greenhouse or Lever feeds</span><textarea rows={5} value={discoverySources} onChange={(event) => setDiscoverySources(event.target.value)} placeholder={"https://boards.greenhouse.io/company\nhttps://jobs.lever.co/company"} /><small>These feeds supplement web search. When learning is enabled, a Greenhouse or Lever employer producing an 80+ match is added automatically. Workday and other portals remain covered through fresh web search.</small></label>
+                {settings?.discovery_learned_sources?.length ? <div className="learned-source-panel"><div><strong>Learned source quality</strong><small>{settings.discovery_learned_sources.length} web source{settings.discovery_learned_sources.length === 1 ? "" : "s"} produced an 80+ match</small></div><div className="learned-source-list">{settings.discovery_learned_sources.slice(0, 8).map((source) => <span key={`${source.host}-${source.company}`} title={`${source.matches} strong match${source.matches === 1 ? "" : "es"} · best ${source.bestScore}`}><b>{source.company}</b><small>{source.atsPlatform} · {source.bestScore}{source.promoted ? " · direct feed added" : " · web monitored"}</small></span>)}</div></div> : null}
                 <div className="discovery-actions"><button className="secondary-button" type="submit" disabled={discoveryBusy}>{discoveryBusy ? "Saving..." : "Save discovery settings"}</button><button className="primary-button compact" type="button" onClick={fetchJobsNow} disabled={discoveryBusy || (!normalizedDiscoverySources().length && !webSearchConfigured)}>{discoveryBusy ? "Fetching..." : "Fetch now"}</button></div>
               </form>
               {settings?.discovery_last_credit_limit ? <p className="connection-detail">Tavily usage: {settings.discovery_last_credit_usage ?? 0} of {Math.min(settings.discovery_last_credit_limit, settings.discovery_monthly_credit_cap ?? 900)} allowed credits this month. When the safety ceiling is reached, the next configured provider takes over.</p> : null}
