@@ -119,7 +119,15 @@ type AppSettings = {
   discovery_serpapi_configured?: boolean;
   discovery_serper_configured?: boolean;
   discovery_last_provider?: string | null;
-  discovery_provider_status?: Array<{ provider: string; status: string; reason: string; results: number }>;
+  discovery_provider_status?: Array<{
+    provider: string;
+    status: string;
+    reason: string;
+    results: number;
+    httpStatus?: number | null;
+    checkedAt?: string | null;
+    zeroCreditCheck?: boolean;
+  }>;
   discovery_monthly_credit_cap?: number;
   discovery_last_credit_usage?: number | null;
   discovery_last_credit_limit?: number | null;
@@ -1426,14 +1434,14 @@ export default function Home() {
 
   const testSearchProviders = async () => {
     setDiscoveryBusy(true);
-    setDiscoveryMessage("Testing each saved provider key without adding jobs...");
+    setDiscoveryMessage("Checking free account endpoints without running any searches...");
     const { data, error } = await supabase.functions.invoke("discover-jobs", { body: { action: "diagnostic" } });
     if (error) {
-      setDiscoveryMessage(await edgeErrorMessage(error, "Provider testing failed."));
+      setDiscoveryMessage(await edgeErrorMessage(error, "Provider status check failed."));
     } else {
-      const working = Number(data?.working ?? 0);
-      const configured = Number(data?.configured ?? 0);
-      setDiscoveryMessage(`${working} of ${configured} configured search providers completed a live test.`);
+      const checked = Number(data?.checked ?? 0);
+      const unavailable = Number(data?.unavailable ?? 0);
+      setDiscoveryMessage(`${checked} provider key${checked === 1 ? "" : "s"} checked without consuming search credits. ${unavailable} provider${unavailable === 1 ? "" : "s"} do not offer a zero-credit validation endpoint.`);
       await loadDashboard();
     }
     setDiscoveryBusy(false);
@@ -2323,8 +2331,21 @@ export default function Home() {
                   <label><span>SerpApi key {settings?.discovery_serpapi_configured ? "- saved" : ""}</span><input type="password" value={serpApiSearchKey} onChange={(event) => setSerpApiSearchKey(event.target.value)} autoComplete="off" placeholder={settings?.discovery_serpapi_configured ? "Paste only to replace" : "SerpApi key"} /></label>
                   <label><span>Serper API key {settings?.discovery_serper_configured ? "- saved" : ""}</span><input type="password" value={serperSearchKey} onChange={(event) => setSerperSearchKey(event.target.value)} autoComplete="off" placeholder={settings?.discovery_serper_configured ? "Paste only to replace" : "Serper key"} /></label>
                 </div>
-                <div className="web-key-actions"><p>Paste any or all keys, then save once. Empty fields preserve previously saved keys. Every key is encrypted in Supabase Vault and is never returned to the browser.</p><div className="web-key-buttons"><button className="secondary-button" type="button" onClick={testSearchProviders} disabled={discoveryBusy || !webSearchConfigured}>Test saved keys</button><button className="secondary-button" type="button" onClick={saveWebSearchKey} disabled={discoveryBusy || ![webSearchKey, exaSearchKey, firecrawlSearchKey, braveSearchKey, serpApiSearchKey, serperSearchKey].some((key) => key.trim())}>{webSearchConfigured ? "Save or replace provider keys" : "Save provider keys"}</button></div></div>
-                {settings?.discovery_provider_status?.length ? <div className="provider-health-grid" aria-label="Search provider status">{settings.discovery_provider_status.map((provider) => <div key={provider.provider} className={`provider-health ${provider.status}`}><span aria-hidden="true">{provider.status === "used" ? "✓" : provider.status === "failed" ? "!" : "-"}</span><p><strong>{provider.provider.replace(/^./, (letter) => letter.toUpperCase())}</strong><small>{provider.reason}</small></p></div>)}</div> : null}
+                <div className="web-key-actions"><p>Paste any or all keys, then save once. Empty fields preserve previously saved keys. Every key is encrypted in Supabase Vault and is never returned to the browser.</p><div className="web-key-buttons"><button className="secondary-button" type="button" onClick={testSearchProviders} disabled={discoveryBusy || !webSearchConfigured}>Check key status</button><button className="secondary-button" type="button" onClick={saveWebSearchKey} disabled={discoveryBusy || ![webSearchKey, exaSearchKey, firecrawlSearchKey, braveSearchKey, serpApiSearchKey, serperSearchKey].some((key) => key.trim())}>{webSearchConfigured ? "Save or replace provider keys" : "Save provider keys"}</button></div></div>
+                {settings?.discovery_provider_status?.length ? <div className="provider-health-grid" aria-label="Search provider status">{settings.discovery_provider_status.map((provider) => {
+                  const httpOk = Boolean(provider.httpStatus && provider.httpStatus >= 200 && provider.httpStatus < 300);
+                  const wasLastUsed = settings.discovery_last_provider === provider.provider;
+                  return <div key={provider.provider} className={`provider-health ${httpOk ? "used" : provider.httpStatus ? "failed" : "skipped"}`}>
+                    <div className="provider-health-heading">
+                      <strong>{provider.provider.replace(/^./, (letter) => letter.toUpperCase())}</strong>
+                      <div className="provider-health-badges">
+                        <span className={`provider-http-status ${httpOk ? "ok" : provider.httpStatus ? "error" : "unavailable"}`}>{provider.httpStatus ? `HTTP ${provider.httpStatus}` : "No free check"}</span>
+                        {wasLastUsed ? <span className="provider-last-used" title={settings.last_discovery_at ? `Last used ${new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short", timeZone: settings.discovery_timezone || "Asia/Singapore" }).format(new Date(settings.last_discovery_at))}` : "Most recently used provider"}>Last used</span> : null}
+                      </div>
+                    </div>
+                    <small>{provider.reason}</small>
+                  </div>;
+                })}</div> : null}
                 <label><span>Target role searches, one per line</span><textarea rows={5} value={webSearchQueries} onChange={(event) => setWebSearchQueries(event.target.value)} /><small>The saved location is added automatically. Two extra searches cover major ATS platforms and independent company career sites.</small></label>
                 <div className="criteria-editor-grid">
                   <label><span>Accepted role keywords, one per line</span><textarea rows={8} value={targetRoleKeywords} onChange={(event) => setTargetRoleKeywords(event.target.value)} /><small>A listing title must match at least one of these terms.</small></label>
