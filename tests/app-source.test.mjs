@@ -138,6 +138,9 @@ test("combines web-wide discovery with strict fresh-graduate filtering", () => {
   assert.match(discoverySource, /function assessEligibility/);
   assert.match(discoverySource, /function requiredExperienceYears/);
   assert.match(discoverySource, /outside target roles/);
+  assert.match(discoverySource, /mid-level or senior experience/);
+  assert.match(discoverySource, /stale posting/);
+  assert.match(discoverySource, /jobUrl\.pathname\.includes\("\/jobs\/view\/"\)/);
   assert.match(discoverySource, /discovery_max_required_years/);
   assert.match(discoverySource, /isIndividualJobResult/);
   assert.match(webDiscoveryMigration, /discovery_web_search_enabled/);
