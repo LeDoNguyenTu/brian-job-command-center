@@ -268,3 +268,14 @@ footer{align-items:center;margin-top:64px;padding:25px 0 6px;font-size:calc(11px
 .application-answer-list{display:grid;gap:8px}.application-answer{position:relative;display:grid;gap:6px;border:1px solid var(--border);border-radius:12px;background:var(--panel);padding:11px 72px 11px 11px}.application-answer.manual{border-color:color-mix(in srgb,var(--amber) 34%,var(--border));background:color-mix(in srgb,var(--amber) 5%,var(--panel))}.application-answer-title{display:flex;align-items:center;gap:8px}.application-answer-title span{color:var(--cyan);font-size:calc(7px + var(--text-adjust,0px));font-weight:850;text-transform:uppercase;letter-spacing:.06em}.application-answer.manual .application-answer-title span{color:var(--amber)}.application-answer-title strong{color:var(--ink);font-size:calc(10px + var(--text-adjust,0px))}.application-answer p{margin:0;color:var(--muted);font-size:calc(10px + var(--text-adjust,0px));line-height:1.55;white-space:pre-wrap}.application-answer small{color:var(--faint);font-size:calc(8px + var(--text-adjust,0px));line-height:1.4}.application-answer>button,.manual-badge{position:absolute;top:10px;right:10px;display:inline-flex;min-width:50px;min-height:30px;align-items:center;justify-content:center;border:1px solid var(--control-border);border-radius:9px;background:var(--panel-soft);padding:5px 8px;color:var(--purple-bright);font-size:calc(8px + var(--text-adjust,0px));font-weight:800}.application-answer>button{cursor:pointer}.application-answer>button:hover,.application-answer>button:focus-visible{border-color:var(--purple-bright);outline:0}.manual-badge{min-width:88px;color:var(--amber)}
 .application-pack-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.application-safety-note{border-left:3px solid var(--amber);padding-left:9px}
 @media(max-width:520px){.application-assistant-heading{align-items:flex-start;flex-direction:column}.application-assistant-heading>span{white-space:normal}.application-answer{padding:11px}.application-answer>button,.manual-badge{position:static;justify-self:start}.application-pack-actions{grid-template-columns:1fr}.application-pack-actions button{width:100%}}
+
+/* Precision alignment for schedule controls, status badges, and the browser clock. */
+.connection-status{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;line-height:1;white-space:nowrap}
+.discovery-schedule-grid{grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)}
+.discovery-schedule-grid>label{min-width:0}
+.discovery-form input[type="time"]{box-sizing:border-box;min-width:0;max-width:100%}
+.browser-clock{display:grid;grid-template-columns:34px minmax(0,1fr) 34px}
+.browser-clock::after{width:34px;height:1px;content:""}
+.browser-clock>div{align-items:center;text-align:center}
+.browser-clock small{max-width:100%}
+@media(max-width:620px){.discovery-schedule-grid{grid-template-columns:minmax(0,1fr)}.security-heading>.connection-status{align-self:flex-start}}
