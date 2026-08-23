@@ -197,6 +197,7 @@ function repeatableFeed(jobUrl: string) {
 async function fetchGreenhouse(slug: string, sourceUrl: string): Promise<Candidate[]> {
   const response = await fetch(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(slug)}/jobs?content=true`, {
     headers: { "User-Agent": "Brian-Job-Command-Center/1.0" },
+    signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) throw new Error(`Greenhouse source ${slug} returned ${response.status}`);
   const payload = await response.json();
@@ -217,6 +218,7 @@ async function fetchGreenhouse(slug: string, sourceUrl: string): Promise<Candida
 async function fetchLever(slug: string, sourceUrl: string): Promise<Candidate[]> {
   const response = await fetch(`https://api.lever.co/v0/postings/${encodeURIComponent(slug)}?mode=json`, {
     headers: { "User-Agent": "Brian-Job-Command-Center/1.0" },
+    signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) throw new Error(`Lever source ${slug} returned ${response.status}`);
   const payload = await response.json();
@@ -287,6 +289,7 @@ function webResultIdentity(result: WebResult, location: string) {
 async function fetchTavilyUsage(apiKey: string) {
   const response = await fetch("https://api.tavily.com/usage", {
     headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(8_000),
   });
   if (!response.ok) throw new Error(`Tavily usage check returned ${response.status}`);
   const payload = await response.json() as TavilyUsagePayload;
@@ -414,6 +417,7 @@ async function fetchTavilySearch(query: string, apiKey: string, location: string
       time_range: "week",
       country: country.toLowerCase(),
     }),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`Tavily search returned ${response.status}`);
   const payload = await response.json() as TavilySearchPayload;
@@ -431,6 +435,7 @@ async function fetchBraveSearch(query: string, apiKey: string, location: string,
   });
   const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
     headers: { Accept: "application/json", "X-Subscription-Token": apiKey },
+    signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`Brave Search returned ${response.status}`);
   const payload = await response.json() as BraveSearchPayload;
@@ -452,6 +457,7 @@ async function fetchSerperSearch(query: string, apiKey: string, location: string
       num: 20,
       tbs: "qdr:w",
     }),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`Serper search returned ${response.status}`);
   const payload = await response.json() as SerperSearchPayload;
@@ -473,6 +479,7 @@ async function fetchExaSearch(query: string, apiKey: string, location: string): 
       startPublishedDate: new Date(Date.now() - 8 * 86_400_000).toISOString(),
       contents: { text: { maxCharacters: 20_000 } },
     }),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`Exa search returned ${response.status}`);
   const payload = await response.json() as ExaSearchPayload;
@@ -494,6 +501,7 @@ async function fetchFirecrawlSearch(query: string, apiKey: string, location: str
       sources: ["web"],
       scrapeOptions: { formats: [{ type: "markdown" }], onlyMainContent: true },
     }),
+    signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`Firecrawl search returned ${response.status}`);
   const payload = await response.json() as FirecrawlSearchPayload;
@@ -515,7 +523,7 @@ async function fetchSerpApiSearch(query: string, apiKey: string, location: strin
     num: "20",
     tbs: "qdr:w",
   });
-  const response = await fetch(`https://serpapi.com/search.json?${params}`);
+  const response = await fetch(`https://serpapi.com/search.json?${params}`, { signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`SerpApi search returned ${response.status}`);
   const payload = await response.json() as SerpApiSearchPayload;
   if (payload.error) throw new Error(`SerpApi: ${payload.error}`);
@@ -559,6 +567,7 @@ async function extractWebResults(results: WebResult[], tavilyKey: string | null,
         method: "POST",
         headers: { Authorization: `Bearer ${tavilyKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ urls: batch.map((result) => result.url), extract_depth: "basic", format: "markdown", include_images: false }),
+        signal: AbortSignal.timeout(15_000),
       });
       if (!response.ok) return;
       const payload = await response.json() as TavilyExtractPayload;
@@ -567,14 +576,14 @@ async function extractWebResults(results: WebResult[], tavilyKey: string | null,
       }
     }));
   } else {
-    const missingContent = uniqueResults.filter((result) => stripHtml(String(result.raw_content ?? "")).length < 300);
-    for (let index = 0; index < missingContent.length; index += 8) {
-      const batch = missingContent.slice(index, index + 8);
+    const missingContent = uniqueResults.filter((result) => stripHtml(String(result.raw_content ?? "")).length < 300).slice(0, 32);
+    const pageBatches = Array.from({ length: Math.ceil(missingContent.length / 8) }, (_, index) => missingContent.slice(index * 8, index * 8 + 8));
+    await Promise.all(pageBatches.map(async (batch) => {
       const descriptions = await Promise.all(batch.map((result) => directPageText(String(result.url ?? ""))));
       descriptions.forEach((description, batchIndex) => {
         if (description) extracted.set(canonicalUrl(String(batch[batchIndex].url ?? "")), description);
       });
-    }
+    }));
   }
 
   return uniqueResults.flatMap((result) => {
@@ -970,7 +979,7 @@ Deno.serve(async (request: Request) => {
           zeroCreditCheck: false,
         });
         if (provider === "tavily") tavilyUsage = await fetchTavilyUsage(apiKey);
-        const enoughCoverage = providersWithResults >= 2 && eligibleWebCandidates >= 12;
+        const enoughCoverage = providersWithResults >= 1 && eligibleWebCandidates >= 12;
         if (enoughCoverage || successfulProviders >= 3) break;
       } catch (error) {
         providerAttempts.push({
