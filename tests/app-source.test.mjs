@@ -122,8 +122,10 @@ test("combines web-wide discovery with strict fresh-graduate filtering", () => {
   assert.match(discoverySource, /providerAttempts/);
   assert.match(discoverySource, /slice\(0, 10\)/);
   assert.match(discoverySource, /interleaveUniqueResults/);
-  assert.match(discoverySource, /providersWithResults >= 2 && eligibleWebCandidates >= 12/);
+  assert.match(discoverySource, /providersWithResults >= 1 && eligibleWebCandidates >= 12/);
   assert.match(discoverySource, /successfulProviders >= 3/);
+  assert.match(discoverySource, /AbortSignal\.timeout\(20_000\)/);
+  assert.match(discoverySource, /missingContent\.length \/ 8/);
   assert.match(discoverySource, /searchFunnel/);
   assert.match(discoverySource, /const isDue = clock\.minutes >= target/);
   assert.match(discoverySource, /Use Fetch now to run another manual scan/);
