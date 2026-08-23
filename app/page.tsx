@@ -1490,7 +1490,7 @@ export default function Home() {
 
   const fetchJobsNow = async () => {
     setDiscoveryBusy(true);
-    setDiscoveryMessage(`Searching direct boards and the wider web for ${discoveryLocation.trim()} roles now...`);
+    setDiscoveryMessage(`Starting a new manual scan for ${discoveryLocation.trim()}. Previously tracked jobs will be refreshed instead of duplicated.`);
     if (!(await persistDiscoverySettings())) {
       setDiscoveryBusy(false);
       return;
@@ -1503,8 +1503,12 @@ export default function Home() {
     } else {
       const usage = data?.tavilyUsage ? ` Tavily used ${data.tavilyUsage.usage} of ${Math.min(data.tavilyUsage.limit, 900)} allowed monthly credits.` : "";
       const provider = data?.webSearchProvider ? ` Web search used ${String(data.webSearchProvider).replace(/^./, (letter: string) => letter.toUpperCase())}.` : "";
-      const fallback = Array.isArray(data?.providerAttempts) && data.providerAttempts.length > 1 ? ` Automatic failover skipped ${data.providerAttempts.length - 1} unavailable provider${data.providerAttempts.length === 2 ? "" : "s"}.` : "";
-      setDiscoveryMessage(`${data?.inserted ?? 0} new roles added for ${data?.targetLocation || discoveryLocation}. ${data?.duplicates ?? 0} already tracked. ${data?.skipped ?? 0} unsuitable roles skipped.${provider}${fallback}${usage}`);
+      const providersChecked = Array.isArray(data?.providerAttempts) ? data.providerAttempts.filter((attempt: { status?: string }) => attempt.status === "used").length : 0;
+      const funnel = data?.searchFunnel
+        ? ` ${data.searchFunnel.rawWebHits} raw web hits became ${data.searchFunnel.webCandidates} candidate pages and ${data.searchFunnel.eligible} matching listings after filtering.`
+        : "";
+      const coverage = providersChecked ? ` ${providersChecked} web provider${providersChecked === 1 ? " was" : "s were"} checked.` : "";
+      setDiscoveryMessage(`Scan completed. ${data?.inserted ?? 0} new roles added for ${data?.targetLocation || discoveryLocation}; ${data?.duplicates ?? 0} matching roles were already tracked.${funnel}${coverage}${provider}${usage}`);
       await loadDashboard();
     }
     setDiscoveryBusy(false);
