@@ -6,6 +6,7 @@ const pageSource = await readFile(new URL("../app/page.tsx", import.meta.url), "
 const supabaseSource = await readFile(new URL("../lib/supabase.ts", import.meta.url), "utf8");
 const globalStyles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 const layoutSource = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+const nextConfigSource = await readFile(new URL("../next.config.ts", import.meta.url), "utf8");
 const discoverySource = await readFile(new URL("../supabase/functions/discover-jobs/index.ts", import.meta.url), "utf8");
 const sourceMigration = await readFile(new URL("../supabase/migrations/202608190011_expand_singapore_discovery_sources.sql", import.meta.url), "utf8");
 const webDiscoveryMigration = await readFile(new URL("../supabase/migrations/20260822205618_broaden_job_discovery_and_decisions.sql", import.meta.url), "utf8");
@@ -65,6 +66,18 @@ test("keeps job titles clear and provides accessible score and text controls", (
   assert.match(globalStyles, /\.scout-actions,\.salary-actions,\.modal-actions,\.document-actions,\.provider-actions\{grid-template-columns:minmax\(0,1fr\)\}/);
 });
 
+test("opens a job from the full card and optically centers dashboard icons", () => {
+  assert.match(pageSource, /aria-label={`Review details for \${job\.role} at \${job\.company}`}/);
+  assert.match(pageSource, /event\.target as HTMLElement\)\.closest\("button, a, input, select, textarea"\)/);
+  assert.match(pageSource, /event\.key !== "Enter" && event\.key !== " "/);
+  assert.match(pageSource, /function DashboardIcon/);
+  assert.match(pageSource, /<DashboardIcon name="clock"/);
+  assert.match(pageSource, /<DashboardIcon name="queue"/);
+  assert.match(pageSource, /<DashboardIcon name="sparkles"/);
+  assert.match(globalStyles, /\.dashboard-icon\{display:block/);
+  assert.match(globalStyles, /\.job-card:focus-visible/);
+});
+
 test("keeps Cloudflare verification visible on narrow screens", () => {
   assert.match(pageSource, /container\.clientWidth < 300 \? "compact" : "flexible"/);
   assert.match(pageSource, /new ResizeObserver\(renderWidget\)/);
@@ -102,6 +115,9 @@ test("combines web-wide discovery with strict fresh-graduate filtering", () => {
   assert.match(discoverySource, /google\.serper\.dev\/search/);
   assert.match(discoverySource, /DEFAULT_PROVIDER_ORDER/);
   assert.match(discoverySource, /providerAttempts/);
+  assert.match(discoverySource, /slice\(0, 10\)/);
+  assert.match(discoverySource, /successfulProviders >= 2/);
+  assert.match(discoverySource, /result set was small so another provider will also be checked/);
   assert.match(discoverySource, /Workday Ashby SmartRecruiters Workable iCIMS Oracle/);
   assert.match(discoverySource, /discovery_monthly_credit_cap/);
   assert.match(discoverySource, /Safety cap reached/);
@@ -231,6 +247,18 @@ test("keeps a deploy-safe Supabase public configuration fallback", () => {
   assert.match(supabaseSource, /defaultSupabaseUrl/);
   assert.match(supabaseSource, /defaultSupabasePublishableKey/);
   assert.doesNotMatch(supabaseSource, /environment variables are not configured/i);
+});
+
+test("sends defensive browser security headers on every route", () => {
+  assert.match(nextConfigSource, /poweredByHeader: false/);
+  assert.match(nextConfigSource, /Content-Security-Policy/);
+  assert.match(nextConfigSource, /frame-ancestors 'none'/);
+  assert.match(nextConfigSource, /X-Content-Type-Options/);
+  assert.match(nextConfigSource, /X-Frame-Options/);
+  assert.match(nextConfigSource, /Referrer-Policy/);
+  assert.match(nextConfigSource, /Permissions-Policy/);
+  assert.match(nextConfigSource, /Cross-Origin-Opener-Policy/);
+  assert.match(nextConfigSource, /source: "\/:path\*"/);
 });
 
 test("keeps theme text and accent tokens at readable contrast", () => {
