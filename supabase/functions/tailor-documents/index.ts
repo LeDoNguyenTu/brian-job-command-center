@@ -102,6 +102,8 @@ type GeneratedContent = {
   };
 };
 
+type DocumentType = "resume" | "cover_letter";
+
 const decodeXml = (value: string) => value
   .replace(/&amp;/g, "&")
   .replace(/&lt;/g, "<")
@@ -134,9 +136,14 @@ const clean = (value: unknown, max = 2000) => String(value ?? "")
   .trim()
   .slice(0, max);
 
-function buildExternalPrompt(job: JobRecord, profile: ProfileRecord, resume: ResumeRecord, baseline: string) {
+function buildExternalPrompt(job: JobRecord, profile: ProfileRecord, resume: ResumeRecord, baseline: string, documentType?: DocumentType) {
   const description = job.job_description?.trim() || "Full job description is not stored. Use only the role details below and flag missing information.";
-  return `Create a tailored one-page ATS-readable resume and a concise one-page cover letter for this exact job.
+  const request = documentType === "resume"
+    ? "Create a tailored one-page ATS-readable resume for this exact job."
+    : documentType === "cover_letter"
+      ? "Create a concise one-page cover letter for this exact job."
+      : "Create a tailored one-page ATS-readable resume and a concise one-page cover letter for this exact job.";
+  return `${request}
 
 NON-NEGOTIABLE FACT RULES
 - Use only facts that appear in the baseline resume or verified applicant facts below.
@@ -195,29 +202,32 @@ BASELINE RESUME TEXT
 ${baseline}`;
 }
 
-const structuredSuffix = `
+const structuredSuffixes: Record<DocumentType, string> = {
+  resume: `
 
 Return JSON only, using exactly this structure:
-{
-  "resume": {
+{"resume": {
     "headline": "job-targeted headline",
     "summary": "3 to 5 concise sentences",
     "skills": [{"label":"Category","value":"comma-separated verified skills"}],
     "sections": [{"heading":"EXPERIENCE","entries":[{"title":"Exact role or project title","detail":"Exact organization or technology line","date":"Exact date","bullets":["Evidence-led bullet"]}]}]
-  },
-  "cover_letter": {
+  }}
+
+Use 4 to 6 resume sections. Keep 12 to 18 total resume bullets, each below 180 characters. Include education and certifications as sections. Do not wrap the JSON in Markdown.`,
+  cover_letter: `
+
+Return JSON only, using exactly this structure:
+{"cover_letter": {
     "greeting": "Dear Hiring Team,",
     "paragraphs": ["Opening paragraph", "Evidence paragraph", "Fit and sponsorship paragraph"],
     "closing": "Sincerely, followed by the candidate full name from PROFILE"
-  }
-}
+  }}
 
-Use 4 to 6 resume sections. Keep 12 to 18 total resume bullets, each below 180 characters. Include education and certifications as sections. Keep the cover letter between 220 and 320 words. Do not wrap the JSON in Markdown.`;
+Keep the cover letter between 220 and 320 words. Do not wrap the JSON in Markdown.`,
+};
 
-const jsonSchema = {
-  type: "OBJECT",
-  required: ["resume", "cover_letter"],
-  properties: {
+const resumeJsonSchema = {
+  type: "OBJECT", required: ["resume"], properties: {
     resume: {
       type: "OBJECT",
       required: ["headline", "summary", "skills", "sections"],
@@ -257,6 +267,11 @@ const jsonSchema = {
         },
       },
     },
+  },
+};
+
+const coverLetterJsonSchema = {
+  type: "OBJECT", required: ["cover_letter"], properties: {
     cover_letter: {
       type: "OBJECT",
       required: ["greeting", "paragraphs", "closing"],
@@ -269,29 +284,37 @@ const jsonSchema = {
   },
 };
 
+const jsonSchemas = { resume: resumeJsonSchema, cover_letter: coverLetterJsonSchema };
+
 function extractJson(value: string) {
   const trimmed = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("The provider did not return structured document content.");
-  return JSON.parse(trimmed.slice(start, end + 1));
+  if (start < 0 || end <= start) throw new Error("The provider output was cut off before the document finished. Please generate this document again.");
+  try {
+    return JSON.parse(trimmed.slice(start, end + 1));
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error("The provider output was cut off or malformed before the document finished. Please generate this document again.");
+    }
+    throw error;
+  }
 }
 
-function normalizeGenerated(value: unknown): GeneratedContent {
+function normalizeGenerated(value: unknown, documentType: DocumentType): GeneratedContent[DocumentType] {
   const root = value as Partial<GeneratedContent>;
-  if (!root?.resume || !root?.cover_letter) throw new Error("The provider response is missing required document sections.");
-  const sections = Array.isArray(root.resume.sections) ? root.resume.sections.slice(0, 7).map((section) => ({
-    heading: clean(section?.heading, 80).toUpperCase(),
-    entries: Array.isArray(section?.entries) ? section.entries.slice(0, 8).map((entry) => ({
-      title: clean(entry?.title, 180),
-      detail: clean(entry?.detail, 220),
-      date: clean(entry?.date, 50),
-      bullets: Array.isArray(entry?.bullets) ? entry.bullets.slice(0, 6).map((bullet) => clean(bullet, 220)).filter(Boolean) : [],
-    })).filter((entry) => entry.title) : [],
-  })).filter((section) => section.heading && section.entries.length) : [];
-
-  const normalized: GeneratedContent = {
-    resume: {
+  if (documentType === "resume") {
+    if (!root?.resume) throw new Error("The provider response is missing the resume section.");
+    const sections = Array.isArray(root.resume.sections) ? root.resume.sections.slice(0, 7).map((section) => ({
+      heading: clean(section?.heading, 80).toUpperCase(),
+      entries: Array.isArray(section?.entries) ? section.entries.slice(0, 8).map((entry) => ({
+        title: clean(entry?.title, 180),
+        detail: clean(entry?.detail, 220),
+        date: clean(entry?.date, 50),
+        bullets: Array.isArray(entry?.bullets) ? entry.bullets.slice(0, 6).map((bullet) => clean(bullet, 220)).filter(Boolean) : [],
+      })).filter((entry) => entry.title) : [],
+    })).filter((section) => section.heading && section.entries.length) : [];
+    const normalizedResume: GeneratedContent["resume"] = {
       headline: clean(root.resume.headline, 220),
       summary: clean(root.resume.summary, 900),
       skills: Array.isArray(root.resume.skills) ? root.resume.skills.slice(0, 10).map((skill) => ({
@@ -299,22 +322,26 @@ function normalizeGenerated(value: unknown): GeneratedContent {
         value: clean(skill?.value, 500),
       })).filter((skill) => skill.label && skill.value) : [],
       sections,
-    },
-    cover_letter: {
-      greeting: clean(root.cover_letter.greeting, 120) || "Dear Hiring Team,",
-      paragraphs: Array.isArray(root.cover_letter.paragraphs)
-        ? root.cover_letter.paragraphs.slice(0, 6).map((paragraph) => clean(paragraph, 1600)).filter(Boolean)
-        : [],
-      closing: clean(root.cover_letter.closing, 160) || "Sincerely,",
-    },
-  };
-  if (!normalized.resume.headline || !normalized.resume.summary || !normalized.resume.sections.length || !normalized.cover_letter.paragraphs.length) {
-    throw new Error("The provider response is incomplete. No documents were saved.");
+    };
+    if (!normalizedResume.headline || !normalizedResume.summary || !normalizedResume.sections.length) {
+      throw new Error("The provider response is incomplete. No resume was saved.");
+    }
+    return normalizedResume;
   }
-  return normalized;
+
+  if (!root?.cover_letter) throw new Error("The provider response is missing the cover letter section.");
+  const normalizedCoverLetter: GeneratedContent["cover_letter"] = {
+    greeting: clean(root.cover_letter.greeting, 120) || "Dear Hiring Team,",
+    paragraphs: Array.isArray(root.cover_letter.paragraphs)
+      ? root.cover_letter.paragraphs.slice(0, 6).map((paragraph) => clean(paragraph, 1600)).filter(Boolean)
+      : [],
+    closing: clean(root.cover_letter.closing, 160) || "Sincerely,",
+  };
+  if (!normalizedCoverLetter.paragraphs.length) throw new Error("The provider response is incomplete. No cover letter was saved.");
+  return normalizedCoverLetter;
 }
 
-async function callProvider(settings: ProviderSettings, key: string, prompt: string) {
+async function callProvider(settings: ProviderSettings, key: string, prompt: string, documentType: DocumentType) {
   if (settings.document_provider === "gemini") {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.document_model)}:generateContent`;
     const providerResponse = await fetch(endpoint, {
@@ -322,12 +349,12 @@ async function callProvider(settings: ProviderSettings, key: string, prompt: str
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       signal: AbortSignal.timeout(45_000),
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `${prompt}${structuredSuffix}` }] }],
+        contents: [{ role: "user", parts: [{ text: `${prompt}${structuredSuffixes[documentType]}` }] }],
         generationConfig: {
           temperature: 0.2,
           maxOutputTokens: 6000,
           responseMimeType: "application/json",
-          responseSchema: jsonSchema,
+          responseSchema: jsonSchemas[documentType],
           thinkingConfig: { thinkingLevel: "low" },
         },
       }),
@@ -337,9 +364,13 @@ async function callProvider(settings: ProviderSettings, key: string, prompt: str
       const detail = clean(body?.error?.message || body?.message || `Provider returned ${providerResponse.status}`, 400);
       throw new Error(detail);
     }
-    const text = body?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("");
+    const candidate = body?.candidates?.[0];
+    if (candidate?.finishReason === "MAX_TOKENS") {
+      throw new Error("The provider output was cut off before the document finished. Please generate this document again.");
+    }
+    const text = candidate?.content?.parts?.map((part: { text?: string }) => part.text || "").join("");
     if (!text) throw new Error("The provider returned no document content.");
-    return normalizeGenerated(extractJson(text));
+    return normalizeGenerated(extractJson(text), documentType);
   }
 
   if (!settings.document_endpoint) throw new Error("The custom provider endpoint is not configured.");
@@ -354,7 +385,7 @@ async function callProvider(settings: ProviderSettings, key: string, prompt: str
     signal: AbortSignal.timeout(45_000),
     body: JSON.stringify({
       model: settings.document_model,
-      messages: [{ role: "user", content: `${prompt}${structuredSuffix}` }],
+      messages: [{ role: "user", content: `${prompt}${structuredSuffixes[documentType]}` }],
       temperature: 0.2,
       response_format: { type: "json_object" },
     }),
@@ -366,7 +397,7 @@ async function callProvider(settings: ProviderSettings, key: string, prompt: str
   }
   const text = body?.choices?.[0]?.message?.content;
   if (!text) throw new Error("The provider returned no document content.");
-  return normalizeGenerated(extractJson(text));
+  return normalizeGenerated(extractJson(text), documentType);
 }
 
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number) {
@@ -552,12 +583,16 @@ Deno.serve(async (request: Request) => {
     ]);
     if (!userData.user || adminError || isAdmin !== true) return responseJson(request, { error: "Unauthorized" }, 401);
 
-    const body = await request.json().catch(() => null) as { action?: string; job_id?: number; resume_code?: string } | null;
+    const body = await request.json().catch(() => null) as { action?: string; job_id?: number; resume_code?: string; document_type?: DocumentType } | null;
     const action = body?.action;
     const jobId = Number(body?.job_id);
     const resumeCode = clean(body?.resume_code, 20);
+    const documentType = body?.document_type;
     if (!Number.isSafeInteger(jobId) || jobId < 1 || !resumeCode) return responseJson(request, { error: "Select a valid job and baseline resume." }, 400);
     if (action !== "prepare_prompt" && action !== "generate") return responseJson(request, { error: "Unsupported action" }, 400);
+    if (action === "generate" && documentType !== "resume" && documentType !== "cover_letter") {
+      return responseJson(request, { error: "Choose either a tailored CV or cover letter to generate." }, 400);
+    }
 
     const service = createClient(url, serviceKey, { auth: { persistSession: false } });
     const [jobResult, profileResult, resumeResult] = await Promise.all([
@@ -575,7 +610,7 @@ Deno.serve(async (request: Request) => {
     const { data: fileBlob, error: fileError } = await service.storage.from("resume-files").download(resume.storage_path);
     if (fileError || !fileBlob) throw new Error(fileError?.message || "The baseline resume could not be read.");
     const baseline = extractDocxText(new Uint8Array(await fileBlob.arrayBuffer()));
-    const prompt = buildExternalPrompt(job, profile, resume, baseline);
+    const prompt = buildExternalPrompt(job, profile, resume, baseline, action === "generate" ? documentType : undefined);
     if (action === "prepare_prompt") return responseJson(request, { prompt, resume_code: resume.code, resume_name: resume.name });
 
     const { data: settingsData, error: settingsError } = await service.from("app_settings")
@@ -588,44 +623,32 @@ Deno.serve(async (request: Request) => {
     const { data: providerKey, error: keyError } = await service.rpc("read_document_provider_key_for_service");
     if (keyError || !providerKey) throw new Error("The provider key is unavailable. Save it again in Security and connections.");
 
-    const generated = await callProvider(settings, providerKey, prompt);
-    const [resumePdf, coverPdf] = await Promise.all([
-      renderResumePdf(generated.resume, baseline),
-      renderCoverLetterPdf(generated.cover_letter, job, baseline),
-    ]);
+    const generated = await callProvider(settings, providerKey, prompt, documentType);
+    const pdf = documentType === "resume"
+      ? await renderResumePdf(generated as GeneratedContent["resume"], baseline)
+      : await renderCoverLetterPdf(generated as GeneratedContent["cover_letter"], job, baseline);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const jobSlug = safeSlug(`${job.company}-${job.position}`);
-    const resumeFilename = `${jobSlug}-${resume.code}-resume.pdf`;
-    const coverFilename = `${jobSlug}-${resume.code}-cover-letter.pdf`;
-    const resumePath = `${job.id}/${stamp}-${resumeFilename}`;
-    const coverPath = `${job.id}/${stamp}-${coverFilename}`;
+    const filename = `${jobSlug}-${resume.code}-${documentType === "resume" ? "resume" : "cover-letter"}.pdf`;
+    const storagePath = `${job.id}/${stamp}-${filename}`;
+    const { error: uploadError } = await service.storage.from("generated-documents")
+      .upload(storagePath, pdf, { contentType: "application/pdf", cacheControl: "3600", upsert: false });
+    if (uploadError) throw new Error(uploadError.message);
 
-    const [resumeUpload, coverUpload] = await Promise.all([
-      service.storage.from("generated-documents").upload(resumePath, resumePdf, { contentType: "application/pdf", cacheControl: "3600", upsert: false }),
-      service.storage.from("generated-documents").upload(coverPath, coverPdf, { contentType: "application/pdf", cacheControl: "3600", upsert: false }),
-    ]);
-    const uploadError = resumeUpload.error || coverUpload.error;
-    if (uploadError) {
-      await service.storage.from("generated-documents").remove([resumePath, coverPath]);
-      throw new Error(uploadError.message);
-    }
-
-    const { data: documents, error: insertError } = await service.from("generated_documents").insert([
-      { job_id: job.id, document_type: "resume", storage_path: resumePath, filename: resumeFilename, source_resume_code: resume.code, provider: settings.document_provider, model: settings.document_model },
-      { job_id: job.id, document_type: "cover_letter", storage_path: coverPath, filename: coverFilename, source_resume_code: resume.code, provider: settings.document_provider, model: settings.document_model },
-    ]).select("*");
+    const { data: document, error: insertError } = await service.from("generated_documents").insert({
+      job_id: job.id, document_type: documentType, storage_path: storagePath, filename,
+      source_resume_code: resume.code, provider: settings.document_provider, model: settings.document_model,
+    }).select("*").single();
     if (insertError) {
-      await service.storage.from("generated-documents").remove([resumePath, coverPath]);
+      await service.storage.from("generated-documents").remove([storagePath]);
       throw new Error(insertError.message);
     }
-    await service.from("jobs").update({
-      cv_version: `${resume.code} tailored`,
-      cv_status: "Ready",
-      cover_letter_status: "Ready",
-      updated_at: new Date().toISOString(),
-    }).eq("id", job.id);
+    const jobUpdate = documentType === "resume"
+      ? { cv_version: `${resume.code} tailored`, cv_status: "Ready", updated_at: new Date().toISOString() }
+      : { cover_letter_status: "Ready", updated_at: new Date().toISOString() };
+    await service.from("jobs").update(jobUpdate).eq("id", job.id);
 
-    return responseJson(request, { documents, resume_code: resume.code, resume_name: resume.name });
+    return responseJson(request, { documents: [document], document_type: documentType, resume_code: resume.code, resume_name: resume.name });
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
       return responseJson(request, { error: "The document provider took longer than 45 seconds. No files were saved. Please try again once." }, 504);
