@@ -10,7 +10,7 @@ const MOM_S_PASS =
   "https://www.mom.gov.sg/passes-and-permits/s-pass/eligibility";
 const JOBS_PER_PAGE = 10;
 const ESSENTIAL_APPLICATION_ANSWER_IDS = new Set([
-  "legal-name", "email", "location", "work-status", "sponsorship", "availability", "languages", "resume",
+  "legal-name", "email", "work-status", "sponsorship", "availability", "resume",
 ]);
 const DEFAULT_DISCOVERY_QUERIES = [
   "graduate junior entry level software developer software engineer",
@@ -2029,7 +2029,6 @@ export default function Home() {
     : [];
   const essentialApplicationAnswers = applicationAnswers.filter((answer) => ESSENTIAL_APPLICATION_ANSWER_IDS.has(answer.id));
   const additionalApplicationAnswers = applicationAnswers.filter((answer) => !ESSENTIAL_APPLICATION_ANSWER_IDS.has(answer.id));
-  const readyApplicationAnswers = applicationAnswers.filter((answer) => answer.ready).length;
 
   return (
     <main className={`${dark ? "app-shell dark" : "app-shell light"} text-size-${textSize}`}>
@@ -2304,7 +2303,7 @@ export default function Home() {
             <section className="application-assistant" aria-labelledby="application-assistant-title">
               <div className="application-assistant-heading">
                 <div><p>APPLICATION ASSISTANT</p><h3 id="application-assistant-title">Ready-to-paste answers</h3></div>
-                <span>{readyApplicationAnswers} ready · {applicationAnswers.length - readyApplicationAnswers} manual</span>
+                <span>{essentialApplicationAnswers.length} essentials · {additionalApplicationAnswers.length} more</span>
               </div>
               <p className="application-assistant-copy">Prepared for {selectedJob.atsPlatform || "this employer portal"} from your verified profile and this job record. Review long answers and eligibility fields before pasting.</p>
               <div className="application-answer-list">
