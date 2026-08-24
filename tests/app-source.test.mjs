@@ -230,13 +230,28 @@ test("bounds Gemini PDF generation and requests structured JSON correctly", () =
   assert.match(pageSource, /Confirm data use first/);
   assert.ok(pageSource.indexOf('className="provider-consent"') < pageSource.indexOf('className="document-actions"'));
   assert.match(tailorDocumentsSource, /responseMimeType: "application\/json"/);
-  assert.match(tailorDocumentsSource, /responseSchema: jsonSchema/);
+  assert.match(tailorDocumentsSource, /responseSchema: jsonSchemas\[documentType\]/);
   assert.match(tailorDocumentsSource, /thinkingConfig: \{ thinkingLevel: "low" \}/);
   assert.match(tailorDocumentsSource, /AbortSignal\.timeout\(45_000\)/);
   assert.match(tailorDocumentsSource, /maxOutputTokens: 6000/);
   assert.match(tailorDocumentsSource, /12 to 18 total resume bullets/);
   assert.doesNotMatch(tailorDocumentsSource, /response_mime_type/);
   assert.doesNotMatch(tailorDocumentsSource, /maxOutputTokens: 12000/);
+});
+
+test("generates and saves the tailored CV and cover letter independently", () => {
+  assert.match(pageSource, /Generate tailored CV/);
+  assert.match(pageSource, /Generate cover letter/);
+  assert.match(pageSource, /body: \{ action: "generate", job_id: selectedJob\.id, resume_code: documentResumeCode, document_type: documentType \}/);
+  assert.doesNotMatch(pageSource, /Generate tailored PDFs/);
+  assert.match(tailorDocumentsSource, /type DocumentType = "resume" \| "cover_letter"/);
+  assert.match(tailorDocumentsSource, /document_type\?: DocumentType/);
+  assert.match(tailorDocumentsSource, /required: \["resume"\]/);
+  assert.match(tailorDocumentsSource, /required: \["cover_letter"\]/);
+  assert.match(tailorDocumentsSource, /job_id: job\.id, document_type: documentType/);
+  assert.match(tailorDocumentsSource, /provider output was cut off/i);
+  assert.match(tailorDocumentsSource, /finishReason === "MAX_TOKENS"/);
+  assert.match(globalStyles, /\.document-actions\{[^}]*grid-template-columns:\.9fr 1fr 1fr/);
 });
 
 test("learns reusable direct feeds only from strong web matches", () => {
