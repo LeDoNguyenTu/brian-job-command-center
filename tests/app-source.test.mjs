@@ -214,6 +214,7 @@ test("prepares verified application answers without submitting employer forms", 
   assert.match(pageSource, /It never fills declarations, solves CAPTCHA, signs in, or submits an application/);
   assert.match(globalStyles, /\.application-primary-actions/);
   assert.match(globalStyles, /\.application-answer-list/);
+  assert.match(globalStyles, /\.application-assistant\{[^}]*margin-bottom:18px/);
   assert.match(globalStyles, /@media\(max-width:520px\).*\.application-pack-actions\{grid-template-columns:1fr\}/s);
 });
 
