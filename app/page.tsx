@@ -2288,11 +2288,11 @@ export default function Home() {
                 <span>Job description used</span>
                 <p>{selectedJob.jobDescription || "No full job description is stored yet. Add it in Edit in dashboard for stronger matching and tailoring."}</p>
               </div>
+              <label className="provider-consent"><input type="checkbox" checked={documentConsent} onChange={(event) => setDocumentConsent(event.target.checked)} /><span>Send this job description, verified applicant facts, and selected resume to my configured provider only for this request.</span></label>
               <div className="document-actions">
                 <button className="secondary-button" onClick={copyExternalPrompt} disabled={documentBusy || !selectedResume?.storage_path}>{promptCopied ? "Prompt copied" : "Copy external prompt"}</button>
-                <button className="primary-button" onClick={generateDocuments} disabled={documentBusy || !documentConsent || !settings?.document_provider_configured || !selectedResume?.storage_path}>{documentBusy ? "Working..." : "Generate tailored PDFs"}</button>
+                <button className="primary-button" onClick={generateDocuments} disabled={documentBusy || !documentConsent || !settings?.document_provider_configured || !selectedResume?.storage_path}>{documentBusy ? "Working..." : !documentConsent ? "Confirm data use first" : "Generate tailored PDFs"}</button>
               </div>
-              <label className="provider-consent"><input type="checkbox" checked={documentConsent} onChange={(event) => setDocumentConsent(event.target.checked)} /><span>Send this job description, verified applicant facts, and selected resume to my configured provider only for this request.</span></label>
               {!settings?.document_provider_configured ? <p className="document-notice">No provider key is saved. The external prompt button still works. Add a key in Security and connections when you want in-site PDF generation.</p> : null}
               {documentMessage ? <p className="document-message" role="status">{documentMessage}</p> : null}
               {generatedDocuments.length ? <div className="generated-list">
