@@ -1674,18 +1674,23 @@ export default function Home() {
     setDocumentBusy(false);
   };
 
-  const generateDocuments = async () => {
+  const generateDocument = async (documentType: GeneratedDocument["document_type"]) => {
     if (!selectedJob || !documentConsent) return;
     setDocumentBusy(true);
-    setDocumentMessage("Generating one-page ATS documents on request. No application will be submitted.");
+    const documentLabel = documentType === "resume" ? "tailored CV" : "cover letter";
+    setDocumentMessage(`Generating your one-page ${documentLabel}. No application will be submitted.`);
     const { data, error } = await supabase.functions.invoke("tailor-documents", {
-      body: { action: "generate", job_id: selectedJob.id, resume_code: documentResumeCode },
+      body: { action: "generate", job_id: selectedJob.id, resume_code: documentResumeCode, document_type: documentType },
     });
     if (error || !data?.documents) {
-      setDocumentMessage(await edgeErrorMessage(error, "Document generation failed. No files were saved."));
+      setDocumentMessage(await edgeErrorMessage(error, `${documentLabel} generation failed. No file was saved.`));
     } else {
-      setGeneratedDocuments((data.documents ?? []) as GeneratedDocument[]);
-      setDocumentMessage(`Resume and cover letter created from ${data.resume_name || documentResumeCode}. Review both PDFs before applying.`);
+      const newDocuments = (data.documents ?? []) as GeneratedDocument[];
+      setGeneratedDocuments((current) => [
+        ...newDocuments,
+        ...current.filter((existing) => !newDocuments.some((created) => created.id === existing.id)),
+      ]);
+      setDocumentMessage(`${documentType === "resume" ? "Tailored CV" : "Cover letter"} created from ${data.resume_name || documentResumeCode} and saved to this job. Review the PDF before applying.`);
       await loadDashboard();
     }
     setDocumentBusy(false);
@@ -2291,7 +2296,8 @@ export default function Home() {
               <label className="provider-consent"><input type="checkbox" checked={documentConsent} onChange={(event) => setDocumentConsent(event.target.checked)} /><span>Send this job description, verified applicant facts, and selected resume to my configured provider only for this request.</span></label>
               <div className="document-actions">
                 <button className="secondary-button" onClick={copyExternalPrompt} disabled={documentBusy || !selectedResume?.storage_path}>{promptCopied ? "Prompt copied" : "Copy external prompt"}</button>
-                <button className="primary-button" onClick={generateDocuments} disabled={documentBusy || !documentConsent || !settings?.document_provider_configured || !selectedResume?.storage_path}>{documentBusy ? "Working..." : !documentConsent ? "Confirm data use first" : "Generate tailored PDFs"}</button>
+                <button className="primary-button" onClick={() => void generateDocument("resume")} disabled={documentBusy || !documentConsent || !settings?.document_provider_configured || !selectedResume?.storage_path}>{documentBusy ? "Working..." : !documentConsent ? "Confirm data use first" : "Generate tailored CV"}</button>
+                <button className="primary-button" onClick={() => void generateDocument("cover_letter")} disabled={documentBusy || !documentConsent || !settings?.document_provider_configured || !selectedResume?.storage_path}>{documentBusy ? "Working..." : !documentConsent ? "Confirm data use first" : "Generate cover letter"}</button>
               </div>
               {!settings?.document_provider_configured ? <p className="document-notice">No provider key is saved. The external prompt button still works. Add a key in Security and connections when you want in-site PDF generation.</p> : null}
               {documentMessage ? <p className="document-message" role="status">{documentMessage}</p> : null}
