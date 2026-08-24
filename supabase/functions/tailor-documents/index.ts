@@ -1,7 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.112.3";
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "npm:pdf-lib@1.17.1";
+import { PDFDocument, rgb, type PDFFont, type PDFPage } from "npm:pdf-lib@1.17.1";
+import fontkit from "npm:@pdf-lib/fontkit@1.1.1";
 import { strFromU8, unzipSync } from "npm:fflate@0.8.2";
+import { DEJAVU_SANS_BOLD, DEJAVU_SANS_REGULAR } from "./resume-fonts.ts";
 
 const allowedOrigins = new Set([
   "https://brian-job.vercel.app",
@@ -136,6 +138,108 @@ const clean = (value: unknown, max = 2000) => String(value ?? "")
   .trim()
   .slice(0, max);
 
+const decodeBase64 = (value: string) => Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+
+async function embedResumeFonts(pdf: PDFDocument) {
+  pdf.registerFontkit(fontkit);
+  const regular = await pdf.embedFont(decodeBase64(DEJAVU_SANS_REGULAR), { subset: true });
+  const bold = await pdf.embedFont(decodeBase64(DEJAVU_SANS_BOLD), { subset: true });
+  return { regular, bold, italic: regular };
+}
+
+const RESUME_SECTION_HEADINGS = new Set([
+  "EXPERIENCE",
+  "ENGINEERING PROJECTS",
+  "SELECTED PROJECTS",
+  "PROJECTS",
+  "EDUCATION",
+  "CERTIFICATIONS",
+]);
+
+type BaselineResume = {
+  header: string[];
+  skills: Array<{ label: string; value: string }>;
+  sections: ResumeSection[];
+};
+
+function parseBaselineResume(baseline: string): BaselineResume {
+  const lines = baseline.split("\n").map((line) => line.trim()).filter(Boolean);
+  const firstHeading = lines.findIndex((line) => line === "PROFESSIONAL SUMMARY");
+  const skillsHeading = lines.findIndex((line) => line === "TECHNICAL SKILLS");
+  const firstContentHeading = lines.findIndex((line) => RESUME_SECTION_HEADINGS.has(line));
+  if (firstHeading < 3 || skillsHeading <= firstHeading || firstContentHeading <= skillsHeading) {
+    throw new Error("The baseline resume structure is incomplete. Upload the original editable DOCX again before generating a tailored CV.");
+  }
+
+  const skills = lines.slice(skillsHeading + 1, firstContentHeading).map((line) => {
+    const separator = line.indexOf(":");
+    if (separator < 1) return null;
+    return { label: clean(line.slice(0, separator), 60), value: clean(line.slice(separator + 1), 500) };
+  }).filter((skill): skill is { label: string; value: string } => Boolean(skill?.label && skill.value));
+
+  const sections: ResumeSection[] = [];
+  let section: ResumeSection | null = null;
+  let entry: ResumeEntry | null = null;
+  const flushEntry = () => {
+    if (section && entry?.title) section.entries.push(entry);
+    entry = null;
+  };
+  const flushSection = () => {
+    flushEntry();
+    if (section?.entries.length) sections.push(section);
+    section = null;
+  };
+
+  for (const line of lines.slice(firstContentHeading)) {
+    if (RESUME_SECTION_HEADINGS.has(line)) {
+      flushSection();
+      section = { heading: line, entries: [] };
+      continue;
+    }
+    if (!section) continue;
+    if (section.heading === "CERTIFICATIONS") {
+      section.entries.push({ title: clean(line, 240), bullets: [] });
+      continue;
+    }
+    const tabIndex = line.lastIndexOf("\t");
+    if (tabIndex > 0) {
+      flushEntry();
+      entry = {
+        title: clean(line.slice(0, tabIndex), 240),
+        date: clean(line.slice(tabIndex + 1), 60),
+        bullets: [],
+      };
+      continue;
+    }
+    if (!entry) {
+      entry = { title: clean(line, 240), bullets: [] };
+      continue;
+    }
+    if (!entry.detail) entry.detail = clean(line, 360);
+    else entry.bullets?.push(clean(line, 700));
+  }
+  flushSection();
+
+  const totalResumeBullets = sections.reduce((total, current) =>
+    total + current.entries.reduce((entryTotal, currentEntry) => entryTotal + (currentEntry.bullets?.length || 0), 0), 0);
+  if (skills.length < 4 || sections.length < 3 || totalResumeBullets < 10) {
+    throw new Error("The baseline resume structure is incomplete. No tailored CV was saved.");
+  }
+  return { header: lines.slice(0, 3), skills, sections };
+}
+
+function hasSuspiciousRepetition(value: string) {
+  const words = clean(value, 8000).toLowerCase().split(/\s+/).filter(Boolean);
+  const windows = new Map<string, number>();
+  for (let index = 0; index <= words.length - 6; index += 1) {
+    const phrase = words.slice(index, index + 6).join(" ");
+    const count = (windows.get(phrase) || 0) + 1;
+    if (count >= 3) return true;
+    windows.set(phrase, count);
+  }
+  return false;
+}
+
 function buildExternalPrompt(job: JobRecord, profile: ProfileRecord, resume: ResumeRecord, baseline: string, documentType?: DocumentType) {
   const description = job.job_description?.trim() || "Full job description is not stored. Use only the role details below and flag missing information.";
   const request = documentType === "resume"
@@ -162,6 +266,8 @@ OUTPUT AND ATS RULES
 - Put the strongest job-relevant evidence first and remove only less relevant detail.
 - Include relevant exact keywords from the job description naturally. Do not keyword-stuff.
 - Keep contact details from the baseline unchanged.
+- Do not rewrite experience, project, education, or certification entries. The system preserves those verified baseline sections exactly.
+- Tailor only the headline, professional summary, and ordering of verified technical skills.
 - Cover letter must be specific to the company and role, direct, and free of generic filler.
 
 JOB INFORMATION
@@ -209,11 +315,10 @@ Return JSON only, using exactly this structure:
 {"resume": {
     "headline": "job-targeted headline",
     "summary": "3 to 5 concise sentences",
-    "skills": [{"label":"Category","value":"comma-separated verified skills"}],
-    "sections": [{"heading":"EXPERIENCE","entries":[{"title":"Exact role or project title","detail":"Exact organization or technology line","date":"Exact date","bullets":["Evidence-led bullet"]}]}]
+    "skills": [{"label":"Category","value":"comma-separated verified skills"}]
   }}
 
-Use 4 to 6 resume sections. Keep 12 to 18 total resume bullets, each below 180 characters. Include education and certifications as sections. Do not wrap the JSON in Markdown.`,
+Return 5 to 8 skill categories using only skills already present in the baseline. The system preserves the complete verified experience, project, education, and certification sections. Do not wrap the JSON in Markdown.`,
   cover_letter: `
 
 Return JSON only, using exactly this structure:
@@ -230,7 +335,7 @@ const resumeJsonSchema = {
   type: "OBJECT", required: ["resume"], properties: {
     resume: {
       type: "OBJECT",
-      required: ["headline", "summary", "skills", "sections"],
+      required: ["headline", "summary", "skills"],
       properties: {
         headline: { type: "STRING" },
         summary: { type: "STRING" },
@@ -240,29 +345,6 @@ const resumeJsonSchema = {
             type: "OBJECT",
             required: ["label", "value"],
             properties: { label: { type: "STRING" }, value: { type: "STRING" } },
-          },
-        },
-        sections: {
-          type: "ARRAY",
-          items: {
-            type: "OBJECT",
-            required: ["heading", "entries"],
-            properties: {
-              heading: { type: "STRING" },
-              entries: {
-                type: "ARRAY",
-                items: {
-                  type: "OBJECT",
-                  required: ["title"],
-                  properties: {
-                    title: { type: "STRING" },
-                    detail: { type: "STRING" },
-                    date: { type: "STRING" },
-                    bullets: { type: "ARRAY", items: { type: "STRING" } },
-                  },
-                },
-              },
-            },
           },
         },
       },
@@ -305,15 +387,6 @@ function normalizeGenerated(value: unknown, documentType: DocumentType): Generat
   const root = value as Partial<GeneratedContent>;
   if (documentType === "resume") {
     if (!root?.resume) throw new Error("The provider response is missing the resume section.");
-    const sections = Array.isArray(root.resume.sections) ? root.resume.sections.slice(0, 7).map((section) => ({
-      heading: clean(section?.heading, 80).toUpperCase(),
-      entries: Array.isArray(section?.entries) ? section.entries.slice(0, 8).map((entry) => ({
-        title: clean(entry?.title, 180),
-        detail: clean(entry?.detail, 220),
-        date: clean(entry?.date, 50),
-        bullets: Array.isArray(entry?.bullets) ? entry.bullets.slice(0, 6).map((bullet) => clean(bullet, 220)).filter(Boolean) : [],
-      })).filter((entry) => entry.title) : [],
-    })).filter((section) => section.heading && section.entries.length) : [];
     const normalizedResume: GeneratedContent["resume"] = {
       headline: clean(root.resume.headline, 220),
       summary: clean(root.resume.summary, 900),
@@ -321,9 +394,9 @@ function normalizeGenerated(value: unknown, documentType: DocumentType): Generat
         label: clean(skill?.label, 60),
         value: clean(skill?.value, 500),
       })).filter((skill) => skill.label && skill.value) : [],
-      sections,
+      sections: [],
     };
-    if (!normalizedResume.headline || !normalizedResume.summary || !normalizedResume.sections.length) {
+    if (!normalizedResume.headline || !normalizedResume.summary || normalizedResume.skills.length < 4 || hasSuspiciousRepetition(`${normalizedResume.headline} ${normalizedResume.summary}`)) {
       throw new Error("The provider response is incomplete. No resume was saved.");
     }
     return normalizedResume;
@@ -427,14 +500,16 @@ type DrawContext = {
 const navy = rgb(0.08, 0.20, 0.36);
 const gray = rgb(0.38, 0.40, 0.43);
 const black = rgb(0.07, 0.07, 0.08);
+const RESUME_MARGIN = 10;
+const RESUME_WIDTH = 595.28 - (RESUME_MARGIN * 2);
 
 function drawLines(ctx: DrawContext, text: string, options: {
   font?: PDFFont; size?: number; x?: number; width?: number; color?: ReturnType<typeof rgb>; indent?: number;
 }) {
   const font = options.font || ctx.regular;
   const size = options.size || ctx.baseSize;
-  const x = options.x ?? 40;
-  const width = options.width ?? 515;
+  const x = options.x ?? RESUME_MARGIN;
+  const width = options.width ?? RESUME_WIDTH;
   const indent = options.indent ?? 0;
   const lines = wrapText(text, font, size, width - indent);
   const lineHeight = size * 1.16 * ctx.leadingScale;
@@ -445,33 +520,33 @@ function drawLines(ctx: DrawContext, text: string, options: {
 }
 
 function drawSectionHeading(ctx: DrawContext, heading: string) {
-  ctx.y -= 2.2 * ctx.leadingScale;
+  ctx.y -= 1.4 * ctx.leadingScale;
   if (ctx.draw) {
-    ctx.page.drawText(heading.toUpperCase(), { x: 40, y: ctx.y, size: 10.7, font: ctx.bold, color: navy });
-    ctx.page.drawLine({ start: { x: 40, y: ctx.y - 2 }, end: { x: 555, y: ctx.y - 2 }, thickness: 0.7, color: navy });
+    ctx.page.drawText(heading.toUpperCase(), { x: RESUME_MARGIN, y: ctx.y, size: 8.2, font: ctx.bold, color: navy });
+    ctx.page.drawLine({ start: { x: RESUME_MARGIN, y: ctx.y - 1.7 }, end: { x: 595.28 - RESUME_MARGIN, y: ctx.y - 1.7 }, thickness: 0.55, color: navy });
   }
-  ctx.y -= 12.4 * ctx.leadingScale;
+  ctx.y -= 9.3 * ctx.leadingScale;
 }
 
 function layoutResume(page: PDFPage, fonts: { regular: PDFFont; bold: PDFFont; italic: PDFFont }, content: GeneratedContent["resume"], header: string[], baseSize: number, leadingScale: number, draw: boolean) {
-  const ctx: DrawContext = { page, ...fonts, baseSize, leadingScale, draw, y: 805 };
+  const ctx: DrawContext = { page, ...fonts, baseSize, leadingScale, draw, y: 818 };
   const name = clean(header[0] || "Candidate", 100).toUpperCase();
   const contact = clean(header[2] || "Singapore", 250);
-  if (draw) page.drawText(name, { x: 40, y: ctx.y, size: 20.5, font: fonts.bold, color: black });
-  ctx.y -= 22.8;
-  drawLines(ctx, content.headline, { font: fonts.bold, size: 10.7, color: navy });
-  drawLines(ctx, contact, { size: 8.3, color: gray });
+  if (draw) page.drawText(name, { x: RESUME_MARGIN, y: ctx.y, size: 15.2, font: fonts.bold, color: black });
+  ctx.y -= 16.2;
+  drawLines(ctx, content.headline, { font: fonts.bold, size: 8.8, color: navy });
+  drawLines(ctx, contact, { size: 7.1, color: gray });
   drawSectionHeading(ctx, "Professional Summary");
   drawLines(ctx, content.summary, {});
   drawSectionHeading(ctx, "Technical Skills");
   for (const skill of content.skills) {
     const label = `${skill.label}:`;
-    if (draw) page.drawText(label, { x: 40, y: ctx.y, size: baseSize, font: fonts.bold, color: black });
-    const offset = Math.min(120, fonts.bold.widthOfTextAtSize(label, baseSize) + 4);
-    const lines = wrapText(skill.value, fonts.regular, baseSize, 515 - offset);
+    if (draw) page.drawText(label, { x: RESUME_MARGIN, y: ctx.y, size: baseSize, font: fonts.bold, color: navy });
+    const offset = Math.min(115, fonts.bold.widthOfTextAtSize(label, baseSize) + 3);
+    const lines = wrapText(skill.value, fonts.regular, baseSize, RESUME_WIDTH - offset);
     for (const [index, line] of lines.entries()) {
-      if (draw) page.drawText(line, { x: 40 + (index === 0 ? offset : 0), y: ctx.y, size: baseSize, font: fonts.regular, color: black });
-      ctx.y -= baseSize * 1.16 * leadingScale;
+      if (draw) page.drawText(line, { x: RESUME_MARGIN + (index === 0 ? offset : 0), y: ctx.y, size: baseSize, font: fonts.regular, color: black });
+      ctx.y -= baseSize * 1.1 * leadingScale;
     }
   }
   for (const section of content.sections) {
@@ -479,19 +554,19 @@ function layoutResume(page: PDFPage, fonts: { regular: PDFFont; bold: PDFFont; i
     for (const entry of section.entries) {
       const date = clean(entry.date, 50);
       const dateWidth = date ? fonts.bold.widthOfTextAtSize(date, baseSize) : 0;
-      const titleWidth = 515 - (dateWidth ? dateWidth + 12 : 0);
+      const titleWidth = RESUME_WIDTH - (dateWidth ? dateWidth + 10 : 0);
       const titleLines = wrapText(entry.title, fonts.bold, baseSize, titleWidth);
       for (const [index, line] of titleLines.entries()) {
-        if (draw) page.drawText(line, { x: 40, y: ctx.y, size: baseSize, font: fonts.bold, color: black });
-        if (draw && index === 0 && date) page.drawText(date, { x: 555 - dateWidth, y: ctx.y, size: baseSize, font: fonts.bold, color: black });
-        ctx.y -= baseSize * 1.12 * leadingScale;
+        if (draw) page.drawText(line, { x: RESUME_MARGIN, y: ctx.y, size: baseSize, font: fonts.bold, color: black });
+        if (draw && index === 0 && date) page.drawText(date, { x: 595.28 - RESUME_MARGIN - dateWidth, y: ctx.y, size: baseSize, font: fonts.regular, color: gray });
+        ctx.y -= baseSize * 1.08 * leadingScale;
       }
-      if (entry.detail) drawLines(ctx, entry.detail, { font: fonts.italic, size: Math.max(7.2, baseSize - 0.45), color: gray });
+      if (entry.detail) drawLines(ctx, entry.detail, { font: fonts.italic, size: Math.max(6.4, baseSize - 0.25), color: gray });
       for (const bullet of entry.bullets || []) {
-        if (draw) page.drawText("•", { x: 51, y: ctx.y, size: baseSize, font: fonts.regular, color: black });
-        drawLines(ctx, bullet, { x: 40, width: 515, indent: 23 });
+        if (draw) page.drawText("•", { x: RESUME_MARGIN, y: ctx.y, size: baseSize, font: fonts.regular, color: black });
+        drawLines(ctx, bullet, { x: RESUME_MARGIN, width: RESUME_WIDTH, indent: 8 });
       }
-      ctx.y -= 1.2 * leadingScale;
+      ctx.y -= 0.65 * leadingScale;
     }
   }
   return ctx.y;
@@ -500,28 +575,29 @@ function layoutResume(page: PDFPage, fonts: { regular: PDFFont; bold: PDFFont; i
 async function renderResumePdf(content: GeneratedContent["resume"], baseline: string) {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([595.28, 841.89]);
-  const fonts = {
-    regular: await pdf.embedFont(StandardFonts.Helvetica),
-    bold: await pdf.embedFont(StandardFonts.HelveticaBold),
-    italic: await pdf.embedFont(StandardFonts.HelveticaOblique),
+  const fonts = await embedResumeFonts(pdf);
+  const baselineResume = parseBaselineResume(baseline);
+  const completeContent: GeneratedContent["resume"] = {
+    ...content,
+    skills: content.skills.length >= 4 ? content.skills : baselineResume.skills,
+    sections: baselineResume.sections,
   };
-  const header = baseline.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 3);
-  let size = 10.3;
-  let leading = 1;
-  let bottom = layoutResume(page, fonts, content, header, size, leading, false);
-  while (bottom < 34 && size > 7.6) {
-    size -= 0.2;
-    bottom = layoutResume(page, fonts, content, header, size, leading, false);
+  let size = 7.5;
+  let leading = 0.98;
+  let bottom = layoutResume(page, fonts, completeContent, baselineResume.header, size, leading, false);
+  while (bottom < 16 && size > 6.7) {
+    size -= 0.1;
+    bottom = layoutResume(page, fonts, completeContent, baselineResume.header, size, leading, false);
   }
-  if (bottom < 28) throw new Error("The generated resume is too long for a readable one-page PDF. Try generation again.");
-  while (bottom > 145 && leading < 1.42) {
-    const candidate = Math.min(1.42, leading + 0.04);
-    const candidateBottom = layoutResume(page, fonts, content, header, size, candidate, false);
-    if (candidateBottom < 34) break;
+  if (bottom < 10) throw new Error("The complete verified resume is too long for one readable page. Shorten the baseline resume before generating again.");
+  while (bottom > 45 && leading < 1.12) {
+    const candidate = Math.min(1.12, leading + 0.02);
+    const candidateBottom = layoutResume(page, fonts, completeContent, baselineResume.header, size, candidate, false);
+    if (candidateBottom < 16) break;
     leading = candidate;
     bottom = candidateBottom;
   }
-  layoutResume(page, fonts, content, header, size, leading, true);
+  layoutResume(page, fonts, completeContent, baselineResume.header, size, leading, true);
   return pdf.save();
 }
 
@@ -532,8 +608,7 @@ function coverLetterClosing(fullName: string) {
 async function renderCoverLetterPdf(content: GeneratedContent["cover_letter"], job: JobRecord, baseline: string, fullName: string) {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([595.28, 841.89]);
-  const regular = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const { regular, bold } = await embedResumeFonts(pdf);
   const header = baseline.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 3);
   const name = clean(header[0] || "Candidate", 100).toUpperCase();
   const contact = clean(header[2] || "Singapore", 250);
