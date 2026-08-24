@@ -254,6 +254,14 @@ test("generates and saves the tailored CV and cover letter independently", () =>
   assert.match(globalStyles, /\.document-actions\{[^}]*grid-template-columns:\.9fr 1fr 1fr/);
 });
 
+test("puts the verified applicant name below the cover letter sign-off", () => {
+  assert.match(tailorDocumentsSource, /function coverLetterClosing\(fullName: string\)/);
+  assert.match(tailorDocumentsSource, /return `Sincerely,\\n\$\{clean\(fullName, 100\)\}`/);
+  assert.match(tailorDocumentsSource, /renderCoverLetterPdf\([^)]*profile\.full_name\)/);
+  assert.match(tailorDocumentsSource, /coverLetterClosing\(fullName\)/);
+  assert.doesNotMatch(tailorDocumentsSource, /const body = \[content\.greeting, \.\.\.content\.paragraphs, content\.closing\]/);
+});
+
 test("learns reusable direct feeds only from strong web matches", () => {
   assert.match(sourceLearningMigration, /discovery_source_learning_enabled/);
   assert.match(sourceLearningMigration, /discovery_learned_sources/);
