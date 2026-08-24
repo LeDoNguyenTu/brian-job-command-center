@@ -10,6 +10,7 @@ const nextConfigSource = await readFile(new URL("../next.config.ts", import.meta
 const proxySource = await readFile(new URL("../proxy.ts", import.meta.url), "utf8");
 const discoverySource = await readFile(new URL("../supabase/functions/discover-jobs/index.ts", import.meta.url), "utf8");
 const tailorDocumentsSource = await readFile(new URL("../supabase/functions/tailor-documents/index.ts", import.meta.url), "utf8");
+const supabaseConfigSource = await readFile(new URL("../supabase/config.toml", import.meta.url), "utf8").catch(() => "");
 const sourceMigration = await readFile(new URL("../supabase/migrations/202608190011_expand_singapore_discovery_sources.sql", import.meta.url), "utf8");
 const webDiscoveryMigration = await readFile(new URL("../supabase/migrations/20260822205618_broaden_job_discovery_and_decisions.sql", import.meta.url), "utf8");
 const tavilyMigration = await readFile(new URL("../supabase/migrations/20260823004500_configurable_tavily_job_discovery.sql", import.meta.url), "utf8");
@@ -255,6 +256,12 @@ test("renders tailored CVs from the complete verified baseline instead of AI-reb
   assert.match(tailorDocumentsSource, /subset: true/);
   assert.match(tailorDocumentsSource, /section\.heading === "EDUCATION"/);
   assert.match(tailorDocumentsSource, /section\.heading === "CERTIFICATIONS"/);
+});
+
+test("keeps document generation compatible with publishable keys and protected in-function", () => {
+  assert.match(supabaseConfigSource, /\[functions\.tailor-documents\][\s\S]*verify_jwt\s*=\s*false/);
+  assert.match(tailorDocumentsSource, /auth\.getUser\(token\)/);
+  assert.match(tailorDocumentsSource, /rpc\("is_current_admin"\)/);
 });
 
 test("generates and saves the tailored CV and cover letter independently", () => {
