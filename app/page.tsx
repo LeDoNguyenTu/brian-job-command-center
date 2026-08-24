@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 const FALLBACK_NOTION_HUB =
@@ -9,6 +9,9 @@ const FALLBACK_NOTION_HUB =
 const MOM_S_PASS =
   "https://www.mom.gov.sg/passes-and-permits/s-pass/eligibility";
 const JOBS_PER_PAGE = 10;
+const ESSENTIAL_APPLICATION_ANSWER_IDS = new Set([
+  "legal-name", "email", "location", "work-status", "sponsorship", "availability", "languages", "resume",
+]);
 const DEFAULT_DISCOVERY_QUERIES = [
   "graduate junior entry level software developer software engineer",
   "graduate junior frontend backend full stack developer",
@@ -838,6 +841,7 @@ export default function Home() {
   const [documentMessage, setDocumentMessage] = useState("");
   const [promptCopied, setPromptCopied] = useState(false);
   const [copiedApplicationField, setCopiedApplicationField] = useState("");
+  const [showAllApplicationAnswers, setShowAllApplicationAnswers] = useState(false);
   const [passkeys, setPasskeys] = useState<Array<{ id: string; friendly_name?: string; created_at: string }>>([]);
   const [jobEditorOpen, setJobEditorOpen] = useState(false);
   const [jobDraft, setJobDraft] = useState<JobDraft>(EMPTY_JOB);
@@ -1061,6 +1065,7 @@ export default function Home() {
     setDocumentMessage("");
     setPromptCopied(false);
     setCopiedApplicationField("");
+    setShowAllApplicationAnswers(false);
     setSelectedJob(job);
   };
 
@@ -1109,32 +1114,67 @@ export default function Home() {
     window.setTimeout(() => setCopied(false), 1600);
   };
 
-  const copyApplicationValue = async (answer: ApplicationAnswer) => {
-    if (!answer.ready) return;
-    await navigator.clipboard.writeText(answer.value);
-    setCopiedApplicationField(answer.id);
-    window.setTimeout(() => setCopiedApplicationField((current) => current === answer.id ? "" : current), 1600);
+  const copyTextFallback = (value: string) => {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    document.body.appendChild(textarea);
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    return copied;
   };
 
-  const copyApplicationPack = async (answers: ApplicationAnswer[]) => {
+  const copyText = async (value: string) => {
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch {
+        // Safari can reject the async clipboard call after opening a new tab.
+      }
+    }
+    return copyTextFallback(value);
+  };
+
+  const applicationPackText = (answers: ApplicationAnswer[]) => {
     const ready = answers.filter((answer) => answer.ready && answer.value);
     const manual = answers.filter((answer) => !answer.ready);
-    const pack = [
+    return [
       "APPLICATION COPY PACK",
       ...ready.map((answer) => `${answer.label}: ${answer.value}`),
       "",
       "CHECK MANUALLY",
       ...manual.map((answer) => `${answer.label}: ${answer.value}`),
     ].join("\n");
-    await navigator.clipboard.writeText(pack);
-    setCopiedApplicationField("all");
-    window.setTimeout(() => setCopiedApplicationField((current) => current === "all" ? "" : current), 1600);
   };
 
-  const openJobWithApplicationPack = (job: Job, answers: ApplicationAnswer[]) => {
-    if (!job.jobUrl) return;
-    window.open(job.jobUrl, "_blank", "noopener,noreferrer");
-    void copyApplicationPack(answers);
+  const markApplicationCopy = (field: string, copied: boolean) => {
+    setCopiedApplicationField(copied ? field : "copy-error");
+    window.setTimeout(() => setCopiedApplicationField((current) => current === field || current === "copy-error" ? "" : current), 1800);
+  };
+
+  const copyApplicationValue = async (answer: ApplicationAnswer) => {
+    if (!answer.ready) return;
+    markApplicationCopy(answer.id, await copyText(answer.value));
+  };
+
+  const copyApplicationPack = async (answers: ApplicationAnswer[]) => {
+    markApplicationCopy("all", await copyText(applicationPackText(answers)));
+  };
+
+  const copyApplicationEssentials = async (answers: ApplicationAnswer[]) => {
+    markApplicationCopy("essentials", await copyText(applicationPackText(answers)));
+  };
+
+  const copyAndOpenJob = (event: MouseEvent<HTMLAnchorElement>, answers: ApplicationAnswer[]) => {
+    const copied = copyTextFallback(applicationPackText(answers));
+    markApplicationCopy("essentials", copied);
+    if (!copied) event.preventDefault();
   };
 
   const refreshPasskeys = async () => {
@@ -1626,10 +1666,10 @@ export default function Home() {
     });
     if (error || !data?.prompt) setDocumentMessage(await edgeErrorMessage(error, "The prompt could not be prepared."));
     else {
-      await navigator.clipboard.writeText(data.prompt);
-      setPromptCopied(true);
-      setDocumentMessage("Prompt copied. Paste it into any document service when your saved provider is unavailable or at its limit.");
-      window.setTimeout(() => setPromptCopied(false), 1800);
+      const didCopy = await copyText(data.prompt);
+      setPromptCopied(didCopy);
+      setDocumentMessage(didCopy ? "Prompt copied. Paste it into any document service when your saved provider is unavailable or at its limit." : "The browser blocked clipboard access. Please try again after allowing clipboard permission.");
+      if (didCopy) window.setTimeout(() => setPromptCopied(false), 1800);
     }
     setDocumentBusy(false);
   };
@@ -1987,6 +2027,8 @@ export default function Home() {
   const applicationAnswers = selectedJob
     ? buildApplicationAnswers(selectedJob, profile, currentUserEmail, selectedSuggestion)
     : [];
+  const essentialApplicationAnswers = applicationAnswers.filter((answer) => ESSENTIAL_APPLICATION_ANSWER_IDS.has(answer.id));
+  const additionalApplicationAnswers = applicationAnswers.filter((answer) => !ESSENTIAL_APPLICATION_ANSWER_IDS.has(answer.id));
   const readyApplicationAnswers = applicationAnswers.filter((answer) => answer.ready).length;
 
   return (
@@ -2040,7 +2082,8 @@ export default function Home() {
             <div className="welcome-meta">
               <div className="browser-clock" aria-label={`Browser time in ${browserTimeZone}`}>
                 <span aria-hidden="true"><DashboardIcon name="clock" /></span>
-                <div><time suppressHydrationWarning>{clockLabel}</time><small suppressHydrationWarning>{browserTimeZone}{browserTimeZoneShort ? ` · ${browserTimeZoneShort}` : ""}</small></div>
+                <div className="browser-clock-main"><time className="browser-clock-time" suppressHydrationWarning>{clockLabel}</time><small className="browser-clock-zone" suppressHydrationWarning>{browserTimeZone}{browserTimeZoneShort ? ` · ${browserTimeZoneShort}` : ""}</small></div>
+                <i aria-hidden="true" />
               </div>
               <div className="secure-chip"><span aria-hidden="true">◉</span> Supabase admin session</div>
             </div>
@@ -2230,6 +2273,11 @@ export default function Home() {
               <div><span>✓</span><p><strong>Location</strong>Singapore</p></div>
               <div className={selectedJob.match === "Blocked" ? "warning" : ""}><span>{selectedJob.match === "Blocked" ? "!" : "?"}</span><p><strong>Next check</strong>{selectedJob.match === "Blocked" ? "Language requirement blocks this role" : "Confirm employer sponsorship"}</p></div>
             </div>
+            <div className="application-primary-actions" aria-label="Primary application actions">
+              <button type="button" className="secondary-button" onClick={() => void copyApplicationEssentials(essentialApplicationAnswers)}>{copiedApplicationField === "essentials" ? "Essentials copied" : "Copy essentials"}</button>
+              {selectedJob.jobUrl ? <a className="primary-button" href={selectedJob.jobUrl} target="_blank" rel="noreferrer" onClick={(event) => copyAndOpenJob(event, essentialApplicationAnswers)}>Copy essentials + open listing ↗</a> : null}
+            </div>
+            {copiedApplicationField === "copy-error" ? <p className="application-copy-error" role="alert">Copying was blocked by the browser. Use an individual Copy button below.</p> : null}
             <section className="document-studio">
               <div className="document-studio-heading">
                 <div><p>DOCUMENT FIT</p><h3>Resume and cover letter</h3></div>
@@ -2260,7 +2308,7 @@ export default function Home() {
               </div>
               <p className="application-assistant-copy">Prepared for {selectedJob.atsPlatform || "this employer portal"} from your verified profile and this job record. Review long answers and eligibility fields before pasting.</p>
               <div className="application-answer-list">
-                {applicationAnswers.map((answer) => (
+                {essentialApplicationAnswers.map((answer) => (
                   <article key={answer.id} className={answer.ready ? "application-answer" : "application-answer manual"}>
                     <div className="application-answer-title"><span>{answer.category}</span><strong>{answer.label}</strong></div>
                     <p>{answer.value || "Missing from your verified profile"}</p>
@@ -2269,15 +2317,24 @@ export default function Home() {
                   </article>
                 ))}
               </div>
+              <button type="button" className="application-disclosure" aria-expanded={showAllApplicationAnswers} onClick={() => setShowAllApplicationAnswers((current) => !current)}>{showAllApplicationAnswers ? "Hide additional answers" : `Show all answers (${additionalApplicationAnswers.length} more)`}</button>
+              {showAllApplicationAnswers ? <div className="application-answer-list application-answer-list-additional">
+                {additionalApplicationAnswers.map((answer) => (
+                  <article key={answer.id} className={answer.ready ? "application-answer" : "application-answer manual"}>
+                    <div className="application-answer-title"><span>{answer.category}</span><strong>{answer.label}</strong></div>
+                    <p>{answer.value || "Missing from your verified profile"}</p>
+                    {answer.note ? <small>{answer.note}</small> : null}
+                    {answer.ready ? <button type="button" onClick={() => void copyApplicationValue(answer)}>{copiedApplicationField === answer.id ? "Copied" : "Copy"}</button> : <span className="manual-badge">Check manually</span>}
+                  </article>
+                ))}
+              </div> : null}
               <div className="application-pack-actions">
                 <button type="button" className="secondary-button" onClick={() => void copyApplicationPack(applicationAnswers)}>{copiedApplicationField === "all" ? "Application pack copied" : "Copy all answers"}</button>
-                {selectedJob.jobUrl ? <button type="button" className="primary-button" onClick={() => openJobWithApplicationPack(selectedJob, applicationAnswers)}>Open listing + copy pack ↗</button> : null}
               </div>
-              <p className="application-safety-note">This prepares answers only. It never fills declarations, solves CAPTCHA, signs in, or submits an application.</p>
+              <p className="application-safety-note">This prepares answers for pasting. Browser security prevents this dashboard from filling another company website. It never fills declarations, solves CAPTCHA, signs in, or submits an application.</p>
             </section>
             <div className="modal-actions">
               <button className="primary-button" onClick={() => openJobEditor(selectedJob)}>Edit in dashboard</button>
-              {selectedJob.jobUrl ? <a className="secondary-button" href={selectedJob.jobUrl} target="_blank" rel="noreferrer">Open job listing ↗</a> : null}
             </div>
             <p className="approval-note">No application is submitted without your approval.</p>
           </section>
