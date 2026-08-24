@@ -226,6 +226,8 @@ test("keeps the browser clock centered and readable on phones", () => {
 });
 
 test("bounds Gemini PDF generation and requests structured JSON correctly", () => {
+  assert.match(pageSource, /Confirm data use first/);
+  assert.ok(pageSource.indexOf('className="provider-consent"') < pageSource.indexOf('className="document-actions"'));
   assert.match(tailorDocumentsSource, /responseMimeType: "application\/json"/);
   assert.match(tailorDocumentsSource, /responseSchema: jsonSchema/);
   assert.match(tailorDocumentsSource, /thinkingConfig: \{ thinkingLevel: "low" \}/);
