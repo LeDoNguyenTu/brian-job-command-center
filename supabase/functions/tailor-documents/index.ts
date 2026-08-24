@@ -215,7 +215,8 @@ function parseBaselineResume(baseline: string): BaselineResume {
       entry = { title: clean(line, 240), bullets: [] };
       continue;
     }
-    if (!entry.detail) entry.detail = clean(line, 360);
+    if (section.heading === "EDUCATION") entry.bullets?.push(clean(line, 700));
+    else if (!entry.detail) entry.detail = clean(line, 360);
     else entry.bullets?.push(clean(line, 700));
   }
   flushSection();
@@ -552,6 +553,11 @@ function layoutResume(page: PDFPage, fonts: { regular: PDFFont; bold: PDFFont; i
   for (const section of content.sections) {
     drawSectionHeading(ctx, section.heading);
     for (const entry of section.entries) {
+      if (section.heading === "CERTIFICATIONS") {
+        if (draw) page.drawText("•", { x: RESUME_MARGIN, y: ctx.y, size: baseSize, font: fonts.regular, color: black });
+        drawLines(ctx, entry.title, { x: RESUME_MARGIN, width: RESUME_WIDTH, indent: 8 });
+        continue;
+      }
       const date = clean(entry.date, 50);
       const dateWidth = date ? fonts.bold.widthOfTextAtSize(date, baseSize) : 0;
       const titleWidth = RESUME_WIDTH - (dateWidth ? dateWidth + 10 : 0);
