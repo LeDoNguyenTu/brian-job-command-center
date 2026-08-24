@@ -234,9 +234,25 @@ test("bounds Gemini PDF generation and requests structured JSON correctly", () =
   assert.match(tailorDocumentsSource, /thinkingConfig: \{ thinkingLevel: "low" \}/);
   assert.match(tailorDocumentsSource, /AbortSignal\.timeout\(45_000\)/);
   assert.match(tailorDocumentsSource, /maxOutputTokens: 6000/);
-  assert.match(tailorDocumentsSource, /12 to 18 total resume bullets/);
+  assert.match(tailorDocumentsSource, /Do not rewrite experience, project, education, or certification entries/);
+  assert.match(tailorDocumentsSource, /parseBaselineResume/);
+  assert.match(tailorDocumentsSource, /baselineResume\.sections/);
+  assert.match(tailorDocumentsSource, /The baseline resume structure is incomplete/);
+  assert.doesNotMatch(tailorDocumentsSource, /"sections": \[\{"heading":"EXPERIENCE"/);
   assert.doesNotMatch(tailorDocumentsSource, /response_mime_type/);
   assert.doesNotMatch(tailorDocumentsSource, /maxOutputTokens: 12000/);
+});
+
+test("renders tailored CVs from the complete verified baseline instead of AI-rebuilt entries", () => {
+  assert.match(tailorDocumentsSource, /const RESUME_SECTION_HEADINGS/);
+  assert.match(tailorDocumentsSource, /function hasSuspiciousRepetition/);
+  assert.match(tailorDocumentsSource, /sections: baselineResume\.sections/);
+  assert.match(tailorDocumentsSource, /const RESUME_MARGIN = 10/);
+  assert.match(tailorDocumentsSource, /let size = 7\.5/);
+  assert.match(tailorDocumentsSource, /totalResumeBullets/);
+  assert.match(tailorDocumentsSource, /pdf\.registerFontkit\(fontkit\)/);
+  assert.match(tailorDocumentsSource, /DEJAVU_SANS_REGULAR/);
+  assert.match(tailorDocumentsSource, /subset: true/);
 });
 
 test("generates and saves the tailored CV and cover letter independently", () => {
