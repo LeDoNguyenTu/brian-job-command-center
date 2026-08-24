@@ -253,6 +253,8 @@ test("renders tailored CVs from the complete verified baseline instead of AI-reb
   assert.match(tailorDocumentsSource, /pdf\.registerFontkit\(fontkit\)/);
   assert.match(tailorDocumentsSource, /DEJAVU_SANS_REGULAR/);
   assert.match(tailorDocumentsSource, /subset: true/);
+  assert.match(tailorDocumentsSource, /section\.heading === "EDUCATION"/);
+  assert.match(tailorDocumentsSource, /section\.heading === "CERTIFICATIONS"/);
 });
 
 test("generates and saves the tailored CV and cover letter independently", () => {
