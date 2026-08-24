@@ -525,7 +525,11 @@ async function renderResumePdf(content: GeneratedContent["resume"], baseline: st
   return pdf.save();
 }
 
-async function renderCoverLetterPdf(content: GeneratedContent["cover_letter"], job: JobRecord, baseline: string) {
+function coverLetterClosing(fullName: string) {
+  return `Sincerely,\n${clean(fullName, 100)}`;
+}
+
+async function renderCoverLetterPdf(content: GeneratedContent["cover_letter"], job: JobRecord, baseline: string, fullName: string) {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([595.28, 841.89]);
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
@@ -538,7 +542,7 @@ async function renderCoverLetterPdf(content: GeneratedContent["cover_letter"], j
   page.drawLine({ start: { x: 48, y: 762 }, end: { x: 547, y: 762 }, thickness: 1, color: navy });
   page.drawText(`${clean(job.position, 110)} | ${clean(job.company, 90)}`, { x: 48, y: 737, size: 12, font: bold, color: navy });
 
-  const body = [content.greeting, ...content.paragraphs, content.closing].filter(Boolean);
+  const body = [content.greeting, ...content.paragraphs, coverLetterClosing(fullName)].filter(Boolean);
   let size = 10.7;
   let lineHeight = 15.2;
   const measure = () => body.reduce((total, paragraph) => total + wrapText(paragraph, regular, size, 499).length * lineHeight + 12, 0);
@@ -626,7 +630,7 @@ Deno.serve(async (request: Request) => {
     const generated = await callProvider(settings, providerKey, prompt, documentType);
     const pdf = documentType === "resume"
       ? await renderResumePdf(generated as GeneratedContent["resume"], baseline)
-      : await renderCoverLetterPdf(generated as GeneratedContent["cover_letter"], job, baseline);
+      : await renderCoverLetterPdf(generated as GeneratedContent["cover_letter"], job, baseline, profile.full_name);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const jobSlug = safeSlug(`${job.company}-${job.position}`);
     const filename = `${jobSlug}-${resume.code}-${documentType === "resume" ? "resume" : "cover-letter"}.pdf`;
