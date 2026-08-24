@@ -1,0 +1,5 @@
+[functions.tailor-documents]
+# New Supabase publishable keys are not legacy JWTs, so the gateway cannot
+# validate them. The function still validates the bearer user with getUser()
+# and requires is_current_admin before reading or generating any documents.
+verify_jwt = false
