@@ -9,6 +9,7 @@ const layoutSource = await readFile(new URL("../app/layout.tsx", import.meta.url
 const nextConfigSource = await readFile(new URL("../next.config.ts", import.meta.url), "utf8");
 const proxySource = await readFile(new URL("../proxy.ts", import.meta.url), "utf8");
 const discoverySource = await readFile(new URL("../supabase/functions/discover-jobs/index.ts", import.meta.url), "utf8");
+const tailorDocumentsSource = await readFile(new URL("../supabase/functions/tailor-documents/index.ts", import.meta.url), "utf8");
 const sourceMigration = await readFile(new URL("../supabase/migrations/202608190011_expand_singapore_discovery_sources.sql", import.meta.url), "utf8");
 const webDiscoveryMigration = await readFile(new URL("../supabase/migrations/20260822205618_broaden_job_discovery_and_decisions.sql", import.meta.url), "utf8");
 const tavilyMigration = await readFile(new URL("../supabase/migrations/20260823004500_configurable_tavily_job_discovery.sql", import.meta.url), "utf8");
@@ -203,12 +204,36 @@ test("supports accept, applied, and reject decisions with filters", () => {
 test("prepares verified application answers without submitting employer forms", () => {
   assert.match(pageSource, /buildApplicationAnswers/);
   assert.match(pageSource, /Ready-to-paste answers/);
-  assert.match(pageSource, /Open listing \+ copy pack/);
+  assert.match(pageSource, /Copy essentials \+ open listing/);
+  assert.match(pageSource, /const copyText = async/);
+  assert.match(pageSource, /document\.execCommand\("copy"\)/);
+  assert.match(pageSource, /ESSENTIAL_APPLICATION_ANSWER_IDS\.has\(answer\.id\)/);
+  assert.match(pageSource, /Show all answers/);
   assert.match(pageSource, /Visa sponsorship required/);
   assert.match(pageSource, /Check the employer sector and application date against the current MOM S Pass table/);
   assert.match(pageSource, /It never fills declarations, solves CAPTCHA, signs in, or submits an application/);
+  assert.match(globalStyles, /\.application-primary-actions/);
   assert.match(globalStyles, /\.application-answer-list/);
   assert.match(globalStyles, /@media\(max-width:520px\).*\.application-pack-actions\{grid-template-columns:1fr\}/s);
+});
+
+test("keeps the browser clock centered and readable on phones", () => {
+  assert.match(pageSource, /className="browser-clock-time"/);
+  assert.match(pageSource, /className="browser-clock-zone"/);
+  assert.match(globalStyles, /@media\(max-width:760px\)[^{]*\{[^}]*\.welcome-section\{[^}]*flex-direction:column/s);
+  assert.match(globalStyles, /@media\(max-width:420px\)[^{]*\{[\s\S]*?\.browser-clock\{[^}]*grid-template-columns:44px minmax\(0,1fr\) 44px/s);
+  assert.match(globalStyles, /\.browser-clock-main\{[^}]*align-items:center[^}]*justify-content:center/s);
+});
+
+test("bounds Gemini PDF generation and requests structured JSON correctly", () => {
+  assert.match(tailorDocumentsSource, /responseMimeType: "application\/json"/);
+  assert.match(tailorDocumentsSource, /responseSchema: jsonSchema/);
+  assert.match(tailorDocumentsSource, /thinkingConfig: \{ thinkingLevel: "low" \}/);
+  assert.match(tailorDocumentsSource, /AbortSignal\.timeout\(45_000\)/);
+  assert.match(tailorDocumentsSource, /maxOutputTokens: 6000/);
+  assert.match(tailorDocumentsSource, /12 to 18 total resume bullets/);
+  assert.doesNotMatch(tailorDocumentsSource, /response_mime_type/);
+  assert.doesNotMatch(tailorDocumentsSource, /maxOutputTokens: 12000/);
 });
 
 test("learns reusable direct feeds only from strong web matches", () => {
