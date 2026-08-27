@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start",
     "test": "npm run build && node --test tests/app-source.test.mjs",
+    "test:discovery": "node --experimental-strip-types --test tests/discovery-*.test.ts",
     "lint": "eslint . --ignore-pattern .next --ignore-pattern .vercel --ignore-pattern dist --ignore-pattern .sites-runtime --ignore-pattern .wrangler"
   },
   "dependencies": {
