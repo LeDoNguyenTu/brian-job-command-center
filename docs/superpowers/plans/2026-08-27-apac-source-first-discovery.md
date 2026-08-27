@@ -2,94 +2,100 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace general web-result ingestion with a trusted, independently scheduled APAC source registry and verified job pipeline.
+**Goal:** Replace direct web-result ingestion with a self-expanding APAC job index that learns legitimate recruitment sources, verifies open vacancies, and runs independently of ChatGPT.
 
-**Architecture:** Supabase Cron invokes a bounded Edge Function orchestrator that leases due official sources, fetches them through provider adapters, normalizes identity and lifecycle fields, and inserts only trusted verified-open jobs. Search providers remain a daily source-discovery fallback, while malformed or untrusted results are quarantined.
+**Architecture:** Supabase Cron invokes a bounded source-first Edge Function. A source resolver fingerprints known ATS infrastructure but also supports unknown official employer sites through generic JSON-LD, embedded JSON and bounded HTML adapters. Search providers and accessible job boards discover candidate sources but cannot directly create main-feed jobs.
 
-**Tech Stack:** Next.js 16, React 19, TypeScript, Supabase Postgres/Auth/Edge Functions/Cron, Deno, Node test runner
+**Tech Stack:** Next.js 16, React 19, TypeScript 5.9, Node 22, Supabase Postgres/Auth/Edge Functions/Cron, Deno
 
 **Spec:** `docs/superpowers/specs/2026-08-27-apac-source-first-discovery-design.md`
 
 ## Global Constraints
 
-- Discovery must not call OpenAI, ChatGPT, or a ChatGPT scheduled task.
-- Existing jobs, applications, decisions, resumes, generated PDFs, provider keys, and manually managed pipeline states must be preserved.
-- All database changes are additive and reversible at the function cutover boundary.
-- Singapore remains enabled after migration; `SG`, `VN`, `MY`, `TH`, `ID`, and `PH` are supported market codes.
-- Only trusted and verified-open jobs may enter the Discovered queue.
-- Unknown publication dates remain null and never fall back to discovery time.
-- Search providers may register supported official sources but may not insert jobs directly.
+- Discovery never calls OpenAI, ChatGPT, or a ChatGPT scheduled task.
+- Known ATS providers are adapter optimizations, never a source allowlist.
+- Existing jobs, applications, decisions, resumes, generated PDFs, provider keys, and manually managed pipeline states are preserved.
+- All database changes are additive until cutover.
+- `SG`, `VN`, `MY`, `TH`, `ID`, and `PH` are supported initially, with Singapore enabled after migration.
+- Only trusted and verified-open jobs can enter a new Discovered record.
+- Unknown publication dates remain null.
+- Search snippets never become jobs directly.
 - Every implementation and documentation commit uses `[skip ci]`.
 - No AI co-author attribution is added.
 
 ---
 
-### Task 1: Establish executable discovery unit tests
+### Task 1: Establish executable discovery tests
 
 **Files:**
 - Modify: `package.json`
 - Create: `tests/discovery-identity.test.ts`
 - Create: `tests/discovery-trust.test.ts`
 - Create: `tests/discovery-markets.test.ts`
+- Create: `tests/discovery-source-classifier.test.ts`
 
 **Interfaces:**
-- Consumes: Node 22+ built-in TypeScript stripping and test runner.
-- Produces: executable test seams for `canonicalizeJobIdentity`, `assessSourceTrust`, and `normalizeJobMarkets`.
+- Produces tests for `canonicalizeJobIdentity`, `assessSourceTrust`, `normalizeJobMarkets`, and `classifyRecruitmentSource`.
 
-- [ ] Add test commands that run TypeScript discovery tests without adding a runtime dependency.
-- [ ] Write identity tests for tracking removal, Indeed `jk`, Workday requisitions, ATS IDs, URL path case, and fallback fingerprints.
-- [ ] Run the tests and confirm they fail because the core modules do not exist.
-- [ ] Write trust tests that allow supported ATS and verified employer hosts while rejecting free-hosting, URL shorteners, aggregators, and deceptive subdomains.
-- [ ] Run the tests and confirm the trust module is missing.
-- [ ] Write market tests for Singapore, Vietnam, Malaysia, Thailand, Indonesia, and the Philippines.
-- [ ] Run the tests and confirm the market module is missing.
-- [ ] Commit the red tests with `[skip ci]`.
+- [ ] Add `test:discovery` using Node 22 TypeScript stripping and `node --test`.
+- [ ] Test URL tracking removal while preserving Indeed `jk`, ATS IDs, Workday requisition paths, and URL path case.
+- [ ] Test trusted official ATS and verified employer hosts plus rejection of free-hosting, shorteners, aggregators, and deceptive subdomains.
+- [ ] Test market normalization for all six initial APAC markets.
+- [ ] Test source fingerprinting for Workday custom patterns, SuccessFactors custom-domain markers, Oracle/Taleo, iCIMS/PageUp, JSON-LD, embedded JSON and unknown official employer fallback.
+- [ ] Run the focused tests and confirm they fail because the core modules are absent.
+- [ ] Commit red tests with `[skip ci]`.
 
-### Task 2: Implement normalized identity, trust, markets, and eligibility
+### Task 2: Implement core identity, trust, markets, classifier and eligibility
 
 **Files:**
 - Create: `supabase/functions/discover-jobs/core/types.ts`
 - Create: `supabase/functions/discover-jobs/core/identity.ts`
 - Create: `supabase/functions/discover-jobs/core/trust.ts`
 - Create: `supabase/functions/discover-jobs/core/markets.ts`
+- Create: `supabase/functions/discover-jobs/core/source-classifier.ts`
 - Create: `supabase/functions/discover-jobs/core/eligibility.ts`
 - Create: `tests/discovery-eligibility.test.ts`
 
 **Interfaces:**
-- Consumes: normalized source URL, adapter metadata, candidate fields, market settings, and current eligibility settings.
-- Produces: `NormalizedJob`, `DiscoverySourceRecord`, provider-aware identity, `SourceTrustAssessment`, market codes, and explicit eligibility decisions.
+- `canonicalizeJobIdentity(input): JobIdentity`
+- `assessSourceTrust(input): SourceTrustAssessment`
+- `normalizeJobMarkets(locations): MarketCode[]`
+- `classifyRecruitmentSource(input): SourceFingerprint`
+- `assessEligibility(job, settings): EligibilityDecision`
 
-- [ ] Implement the minimum identity code required by the failing tests.
-- [ ] Implement source trust with explicit supported ATS patterns and conservative employer-host evidence.
-- [ ] Implement market normalization with structured locations taking precedence over free text.
-- [ ] Run the focused tests and confirm they pass.
-- [ ] Write failing eligibility tests proving ingestion precedes filtering, Singapore-only sponsorship rules, language handling, experience limits, full-time/contract acceptance, and internship/part-time exclusion.
-- [ ] Implement pure eligibility assessment returning all decision reasons.
-- [ ] Run all focused tests and refactor only while green.
-- [ ] Commit the core domain layer with `[skip ci]`.
+- [ ] Implement minimum identity behavior required by Task 1 tests.
+- [ ] Implement conservative trust assessment with provider fingerprints and verified-employer-host evidence.
+- [ ] Implement APAC market aliases with structured location precedence.
+- [ ] Implement source classification where known providers map to optimized adapters but unknown verified employer sites map to generic adapters.
+- [ ] Run Task 1 tests until green.
+- [ ] Add failing eligibility tests for seniority, experience limits, employment type, mandatory language and Singapore-only sponsorship restrictions.
+- [ ] Implement deterministic eligibility decisions returning all reasons.
+- [ ] Run all discovery core tests.
+- [ ] Commit core domain layer with `[skip ci]`.
 
-### Task 3: Add the source registry and job lifecycle schema
+### Task 3: Add source registry and lifecycle schema
 
 **Files:**
-- Create: migration generated by `supabase migration new apac_source_first_discovery`
-- Test: `tests/discovery-schema.test.mjs`
+- Create: one timestamped `supabase/migrations/*_apac_source_first_discovery.sql`
+- Create: `tests/discovery-schema.test.mjs`
 
 **Interfaces:**
-- Consumes: existing `app_settings`, `jobs`, `is_current_admin()`, Vault cron secret, and direct source URL array.
-- Produces: `discovery_sources`, `discovery_runs`, `discovery_quarantine`, additive lifecycle columns on `jobs`, market settings, indexes, RLS policies, and service-only source leasing RPC.
+- Produces `discovery_sources`, `discovery_runs`, `discovery_quarantine`, additive job lifecycle columns, `discovery_markets`, source-leasing RPC and five-minute Cron reconciliation.
 
-- [ ] Use `supabase migration new` to create the migration filename.
-- [ ] Write source assertions for required tables, columns, constraints, indexes, RLS, grants, and cron reconciliation, then confirm they fail.
-- [ ] Add the registry, run, and quarantine tables with bounded JSON fields and RLS enabled.
-- [ ] Revoke broad execution on privileged helper functions and grant only `service_role` where required.
-- [ ] Add lifecycle fields to `jobs`, preserving existing values and pipeline states.
-- [ ] Add `discovery_markets` to settings and migrate Singapore as enabled.
-- [ ] Seed the registry from existing Greenhouse and Lever URLs without exposing credentials.
-- [ ] Reconcile the named five-minute cron job using Vault-backed secret lookup.
-- [ ] Run schema tests and `git diff --check`.
-- [ ] Commit the additive migration with `[skip ci]`.
+- [ ] Write schema assertions first and confirm the migration file is absent.
+- [ ] Add `discovery_sources` fields for source class, provider, adapter, confidence, evidence, market codes, trust, cadence, leasing and health.
+- [ ] Add `discovery_runs` and `discovery_quarantine` with bounded JSON fields.
+- [ ] Add lifecycle fields to `jobs` without replacing existing columns or pipeline values.
+- [ ] Add `discovery_markets` to `app_settings`, preserving Singapore.
+- [ ] Add indexes for due-source leasing, provider identity and active verified jobs.
+- [ ] Enable RLS on new public tables with admin-only policies.
+- [ ] Create a service-only leasing function, revoke `PUBLIC`, and grant only `service_role`.
+- [ ] Seed existing direct source URLs into the registry without credentials.
+- [ ] Reconcile one named five-minute Cron invocation using Vault-backed project URL and scheduled secret.
+- [ ] Run schema source tests.
+- [ ] Commit migration with `[skip ci]`.
 
-### Task 4: Implement official source adapters
+### Task 4: Implement source adapters and generic fallbacks
 
 **Files:**
 - Create: `supabase/functions/discover-jobs/adapters/types.ts`
@@ -99,63 +105,71 @@
 - Create: `supabase/functions/discover-jobs/adapters/smartrecruiters.ts`
 - Create: `supabase/functions/discover-jobs/adapters/workday.ts`
 - Create: `supabase/functions/discover-jobs/adapters/jsonld.ts`
+- Create: `supabase/functions/discover-jobs/adapters/embedded-json.ts`
+- Create: `supabase/functions/discover-jobs/adapters/generic-employer-html.ts`
+- Create: `supabase/functions/discover-jobs/adapters/verified-board.ts`
 - Create: `supabase/functions/discover-jobs/adapters/index.ts`
 - Create: `tests/discovery-adapters.test.ts`
 
 **Interfaces:**
-- Consumes: one `DiscoverySourceRecord`, injected `fetch`, provider fixtures.
-- Produces: `AdapterResult` containing normalized jobs, source health, and non-secret error summaries.
+- `fetchSourceJobs(source, fetcher): Promise<AdapterResult>`
+- All adapters emit `NormalizedJob[]` plus bounded health metadata.
 
-- [ ] Write fixture-based failing tests for Greenhouse, Lever, Ashby, SmartRecruiters, Workday, and JSON-LD.
-- [ ] Confirm each adapter test fails because the adapter is absent.
-- [ ] Implement adapters one at a time, running the focused test after each implementation.
-- [ ] Bound response sizes, pagination, timeouts, redirects, and stored descriptions.
-- [ ] Treat presence in a successful official feed as verified open.
-- [ ] Treat blocks and malformed payloads as source failures, never as job closure.
-- [ ] Run all adapter and core tests.
-- [ ] Commit official adapters with `[skip ci]`.
+- [ ] Write fixture tests before each adapter implementation.
+- [ ] Implement structured provider adapters with response-size, redirect, pagination and timeout bounds.
+- [ ] Implement JSON-LD extraction without executing page scripts.
+- [ ] Implement bounded recursive extraction from embedded hydration/application JSON.
+- [ ] Implement generic employer HTML discovery limited to official source origin and bounded job-detail links.
+- [ ] Implement verified-board parsing as lower-trust than official employer sources.
+- [ ] Route unknown legitimate employer infrastructure to generic adapters rather than rejecting it.
+- [ ] Treat blocks and malformed payloads as source failures, never as evidence of closure.
+- [ ] Run adapter and core tests.
+- [ ] Commit adapters with `[skip ci]`.
 
-### Task 5: Implement lifecycle reconciliation and source discovery
+### Task 5: Implement source learning and lifecycle reconciliation
 
 **Files:**
-- Create: `supabase/functions/discover-jobs/pipeline/reconcile.ts`
 - Create: `supabase/functions/discover-jobs/pipeline/source-discovery.ts`
+- Create: `supabase/functions/discover-jobs/pipeline/reconcile.ts`
 - Create: `supabase/functions/discover-jobs/pipeline/run.ts`
-- Create: `tests/discovery-lifecycle.test.ts`
 - Create: `tests/discovery-source-discovery.test.ts`
+- Create: `tests/discovery-lifecycle.test.ts`
 
 **Interfaces:**
-- Consumes: adapter results, existing job identities, configured markets and eligibility, search results.
-- Produces: deterministic insert, refresh, close, quarantine, and source-registration operations plus run metrics.
+- Search hits produce source proposals only.
+- Reconciliation produces deterministic insert, refresh, close and quarantine operations.
 
-- [ ] Write failing lifecycle tests for first seen, last seen, null posted date, duplicate refresh, two successful omissions, failed-source protection, and manual-pipeline protection.
-- [ ] Implement pure reconciliation operations and make the tests pass.
-- [ ] Write failing source-discovery tests proving search results cannot create jobs and only trusted supported source roots can be registered.
-- [ ] Implement source proposal parsing and make the tests pass.
-- [ ] Add deterministic bounded run planning for scheduled, manual, dry-run, maintenance, and diagnostic actions.
-- [ ] Test that one failed source does not abort other source results.
-- [ ] Commit lifecycle and discovery planning with `[skip ci]`.
+- [ ] Test that web results cannot directly emit job inserts.
+- [ ] Test new official employer domains can become reusable generic sources without a code deployment.
+- [ ] Test source classification and trust evidence are persisted with proposals.
+- [ ] Test first seen, last seen, null posted date, duplicate refresh, two successful omissions, failed-source protection and manual-pipeline protection.
+- [ ] Implement source proposal normalization and source registration decisions.
+- [ ] Implement lifecycle reconciliation.
+- [ ] Implement bounded run planning for scheduled, manual, dry-run, maintenance and diagnostic actions.
+- [ ] Test one failed source does not abort other sources.
+- [ ] Commit pipeline with `[skip ci]`.
 
-### Task 6: Replace the monolithic Edge Function orchestrator
+### Task 6: Replace the monolithic discovery orchestrator
 
 **Files:**
 - Modify: `supabase/functions/discover-jobs/index.ts`
-- Test: `tests/discovery-function-source.test.mjs`
+- Create: `tests/discovery-function-source.test.mjs`
 
 **Interfaces:**
-- Consumes: existing CORS, scheduled secret, signed-in admin authorization, encrypted provider-key RPC, source leasing RPC, adapters, and reconciliation operations.
-- Produces: backward-compatible HTTP actions and structured source-first run results.
+- Preserves existing CORS, scheduled secret validation, signed-in admin authorization, encrypted provider-key retrieval and public HTTP actions.
+- Routes acquisition through source registry and adapters.
 
-- [ ] Write source-level failing tests for authorization retention, no direct web insertion, bounded leases, dry-run safety, run persistence, and ChatGPT independence.
-- [ ] Replace embedded parsing and filtering with imports from the new modules.
+- [ ] Add failing source-level tests for authorization, no direct web insertion, bounded leases, dry-run safety, run persistence and ChatGPT independence.
 - [ ] Preserve `manual`, `scheduled`, `maintenance`, and `diagnostic`; add `dry-run`.
-- [ ] Persist source attempt health and one aggregate `discovery_runs` record.
-- [ ] Keep search-provider diagnostics and safety caps.
-- [ ] Ensure dry-run writes only run metrics and quarantine diagnostics.
-- [ ] Run discovery tests, legacy tests, TypeScript, lint, and build.
-- [ ] Commit the orchestrator replacement with `[skip ci]`.
+- [ ] Lease due registry sources and fetch each independently.
+- [ ] Persist source health and aggregate run metrics.
+- [ ] Run source discovery only when due, and allow it to register sources or quarantine candidates only.
+- [ ] Reconcile verified adapter output into jobs.
+- [ ] Keep provider diagnostics and credit caps.
+- [ ] Run focused source tests and existing regression assertions.
+- [ ] Commit orchestrator replacement with `[skip ci]`.
 
-### Task 7: Add APAC market and source health controls to the dashboard
+### Task 7: Add APAC markets and crawler health to dashboard
 
 **Files:**
 - Modify: `app/page.tsx`
@@ -163,53 +177,42 @@
 - Modify: `tests/app-source.test.mjs`
 
 **Interfaces:**
-- Consumes: `discovery_markets`, latest discovery run metrics, source health summary, lifecycle fields on jobs.
-- Produces: market selector, source health panel, accurate job freshness labels, and verified-only default feed behavior.
+- Consumes markets, latest run metrics, source health and lifecycle fields.
 
-- [ ] Write failing UI source assertions for APAC market controls, verified status, null-date wording, source health, and quarantine metrics.
-- [ ] Replace the single-country editor with compact toggles for supported markets while preserving Singapore.
-- [ ] Display healthy, due, and failing source counts plus latest verified, closed, and quarantined counts.
-- [ ] Display `Date unavailable` for null `posted_at` and keep first-seen separate.
-- [ ] Keep manually managed jobs visible and default Discovered results to trusted verified-open jobs.
-- [ ] Verify responsive layout at phone and desktop widths.
-- [ ] Run React review, tests, TypeScript, lint, and build.
+- [ ] Add failing UI source assertions for market controls, verified state, null-date wording, source health, adapter classes and quarantine metrics.
+- [ ] Replace the single-country editor with toggles for the six initial markets.
+- [ ] Display healthy, due and failing source counts plus provider/generic-source breakdown.
+- [ ] Display `Date unavailable` for null posting dates while keeping first-seen separate.
+- [ ] Keep manually managed jobs visible and default new Discovered results to trusted verified-open records.
+- [ ] Run source assertions and production build when dependencies are available.
 - [ ] Commit dashboard integration with `[skip ci]`.
 
-### Task 8: Deploy schema and execute a production dry run
-
-**Files:**
-- Modify only if dry-run evidence exposes a defect covered by a new failing test.
-
-**Interfaces:**
-- Consumes: verified migration and Edge Function bundle.
-- Produces: live source registry, dry-run metrics, and no visible job mutations.
-
-- [ ] Re-read current Supabase changelog and Cron/Edge Function documentation.
-- [ ] Apply the additive migration to Brian Job Command Center only.
-- [ ] Run database advisors and inspect RLS, grants, functions, and cron state.
-- [ ] Deploy the source-first Edge Function with the existing gateway setting.
-- [ ] Invoke `dry-run` and inspect source attempts, trust decisions, identities, dates, markets, and bounded runtime.
-- [ ] Add a failing regression test for every defect found, then fix and redeploy.
-- [ ] Confirm existing applications, PDFs, keys, and manual pipeline states are unchanged.
-- [ ] Commit any verified corrections with `[skip ci]`.
-
-### Task 9: Cut over and verify the complete production flow
+### Task 8: Validate and deploy schema to Brian Job Command Center
 
 **Files:**
 - Modify only for evidence-backed fixes.
 
-**Interfaces:**
-- Consumes: healthy dry-run, deployed dashboard, current cron runner.
-- Produces: trusted production discovery and auditable acceptance evidence.
+- [ ] Re-check current Supabase changelog and Cron/Edge Function documentation.
+- [ ] Apply the additive migration only to Supabase project `Brian Job Command Center`.
+- [ ] Run security and performance advisors.
+- [ ] Inspect RLS, grants, leasing function, source tables and Cron state.
+- [ ] Confirm existing applications, documents, provider keys and manual pipeline states are unchanged.
+
+### Task 9: Deploy function and execute production dry run
+
+- [ ] Deploy the source-first Edge Function with the existing JWT gateway setting.
+- [ ] Invoke `dry-run` and inspect source attempts, trust, identities, dates, markets, generic fallback classification and runtime bounds.
+- [ ] Add a regression test for every defect found before fixing it.
+- [ ] Re-deploy until dry-run evidence is clean.
+- [ ] Confirm dry-run does not mutate the visible job queue.
+
+### Task 10: Cut over and verify production
 
 - [ ] Enable source-first writes and run one controlled manual scan.
-- [ ] Quarantine or reject suspicious untouched Discovered records without changing Applied or later pipelines.
-- [ ] Verify zero untrusted domains in the active Discovered queue.
-- [ ] Verify newly inserted jobs are trusted and verified open, dates are honest, and identities do not collide.
-- [ ] Verify scheduled cron reaches the function independently of ChatGPT.
-- [ ] Run all tests, TypeScript, lint, build, database advisors, Edge logs, and Vercel runtime checks.
-- [ ] Verify the live dashboard on phone and desktop with the authenticated browser workflow.
-- [ ] Compare every acceptance criterion in the spec with fresh evidence.
-- [ ] Open a pull request, review the exact diff, and merge only when rollback safety and production checks pass.
-- [ ] Pause the legacy ChatGPT Job Match Scout only after the website scanner is proven independent and the user authorizes automation cleanup.
-
+- [ ] Quarantine suspicious untouched Discovered records without changing Applied or later pipeline records.
+- [ ] Verify newly inserted jobs are trusted, verified open, correctly identified and honestly dated.
+- [ ] Verify an unknown legitimate employer source can be registered and ingested through a generic adapter.
+- [ ] Verify the scheduled Cron reaches the website scanner without ChatGPT.
+- [ ] Run repository tests, TypeScript, lint, build, database advisors, Edge logs and live dashboard checks.
+- [ ] Open and review a PR against `main` and merge only when the exact head is verified.
+- [ ] Leave the legacy ChatGPT Job Match Scout untouched until the independent production scanner is proven and the user explicitly authorizes automation cleanup.
