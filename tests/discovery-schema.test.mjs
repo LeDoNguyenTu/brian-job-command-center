@@ -36,10 +36,10 @@ test("adds bounded service-only source leasing", () => {
   assert.match(sql, /grant execute on function public\.lease_discovery_sources\(integer, integer\) to service_role/i);
 });
 
-test("reconciles one five-minute Vault-backed cron runner", () => {
+test("reconciles one per-minute Vault-backed cron runner", () => {
   const sql = loadMigration();
   assert.match(sql, /brian-job-discovery-runner/i);
-  assert.match(sql, /\*\/5 \* \* \* \*/);
+  assert.match(sql, /'\* \* \* \* \*'/);
   assert.match(sql, /vault\.decrypted_secrets/i);
   assert.match(sql, /job_discovery_cron_secret/i);
   assert.match(sql, /x-cron-secret/i);
