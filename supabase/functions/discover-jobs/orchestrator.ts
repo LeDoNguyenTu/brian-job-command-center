@@ -642,18 +642,40 @@ export async function handleDiscoveryRequest(request: Request): Promise<Response
         }
 
         for (const refresh of reconciled.refreshes) {
-          const { error } = await service.from('jobs').update({
+          const currentJob = refresh.currentJob;
+          const restriction = sponsorshipRestriction(currentJob.descriptionText);
+          const refreshEligibility = assessEligibility({
+            marketCodes: currentJob.countryCodes,
+            title: currentJob.title,
+            employmentType: currentJob.employmentType,
+            requiredYears: requiredExperienceYears(currentJob.descriptionText),
+            mandatoryLanguages: mandatoryLanguages(currentJob.descriptionText),
+            sponsorshipRestriction: restriction,
+          }, eligibilitySettings);
+          const shouldBlock = refresh.existingPipeline === 'Discovered' && !refreshEligibility.eligible;
+          const refreshUpdate: Record<string, unknown> = {
             provider_job_id: refresh.providerJobId,
             source_external_id: refresh.providerJobId,
             canonical_url: refresh.canonicalUrl,
             dedupe_key: refresh.canonicalUrl,
+            job_url: currentJob.applyUrl || currentJob.canonicalUrl,
+            job_description: currentJob.descriptionText,
+            employment_type: currentJob.employmentType,
+            location: currentJob.locations.join(' | ') || MARKET_NAME[currentJob.countryCodes[0] ?? source.marketCodes[0] ?? 'SG'],
+            market_code: currentJob.countryCodes[0] ?? null,
             last_seen_at: refresh.lastSeenAt,
             last_verified_at: refresh.lastVerifiedAt,
             availability_status: refresh.availabilityStatus,
             availability_evidence: refresh.availabilityEvidence,
             posted_at: refresh.postedAt,
             missing_from_source_count: 0,
-          }).eq('id', refresh.id);
+          };
+          if (shouldBlock) {
+            refreshUpdate.pipeline = 'Blocked';
+            refreshUpdate.approved_to_apply = false;
+            refreshUpdate.gaps_risks = `Blocked after source refresh revalidation: ${refreshEligibility.reasons.join('; ')}`;
+          }
+          const { error } = await service.from('jobs').update(refreshUpdate).eq('id', refresh.id);
           if (!error) metrics.refreshed += 1;
         }
         for (const missing of reconciled.missingUpdates) {
