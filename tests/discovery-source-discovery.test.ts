@@ -87,3 +87,14 @@ test('learned ATS sources derive employer name from the stable source slug, not 
   assert.equal(proposal.source.company, 'Guardsquare');
   assert.equal(proposal.source.displayName, 'Guardsquare');
 });
+
+test('company names containing broad industry words are not mistaken for job titles', () => {
+  const proposal = proposeDiscoverySource({
+    url: 'https://job-boards.greenhouse.io/abnormalsecurity',
+    title: 'Abnormal Security',
+    snippet: 'Careers at Abnormal Security',
+  });
+  assert.equal(proposal.kind, 'source');
+  assert.equal(proposal.source.company, 'Abnormal Security');
+  assert.equal(proposal.source.displayName, 'Abnormal Security');
+});
