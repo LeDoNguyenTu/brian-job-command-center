@@ -40,6 +40,40 @@ const companyFromTitleOrHost = (title: string | undefined, hostname: string) => 
   return first ? first.replace(/[-_]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()) : 'Unknown employer';
 };
 
+const hostMatches = (hostname: string, root: string) => hostname === root || hostname.endsWith(`.${root}`);
+
+function isIndividualBoardListing(url: URL) {
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+  const path = url.pathname;
+
+  if (hostMatches(hostname, 'indeed.com')) {
+    return Boolean(url.searchParams.get('jk')) || /\/viewjob(?:\/|$)/i.test(path);
+  }
+  if (hostMatches(hostname, 'linkedin.com')) {
+    return /\/jobs\/view\/(?:[^/]+-)?\d+(?:\/|$)/i.test(path);
+  }
+  if (hostMatches(hostname, 'jobstreet.com') || hostMatches(hostname, 'jobstreet.com.sg') || hostMatches(hostname, 'seek.com.au')) {
+    return /\/job\/\d+(?:\/|$)/i.test(path);
+  }
+  if (hostMatches(hostname, 'mycareersfuture.gov.sg')) {
+    return /\/job\//i.test(path) && /[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i.test(path);
+  }
+  if (hostMatches(hostname, 'glints.com')) {
+    return /\/opportunities\/jobs\//i.test(path);
+  }
+  if (hostMatches(hostname, 'itviec.com')) {
+    return /\/it-jobs\//i.test(path);
+  }
+  if (hostMatches(hostname, 'topcv.vn')) {
+    return /\/viec-lam\//i.test(path) && /\d+(?:\.html)?\/?$/i.test(path);
+  }
+  if (hostMatches(hostname, 'vietnamworks.com')) {
+    return /(?:-|\/)jv(?:-|\/|$)|\/job\//i.test(path);
+  }
+
+  return false;
+}
+
 export function proposeDiscoverySource(input: SearchSourceCandidate): SourceProposal {
   let url: URL;
   try { url = new URL(input.url); } catch {
@@ -53,6 +87,15 @@ export function proposeDiscoverySource(input: SearchSourceCandidate): SourceProp
   });
 
   if (fingerprint.sourceClass === 'verified_board' && fingerprint.adapter === 'verified_board') {
+    if (!isIndividualBoardListing(url)) {
+      return {
+        kind: 'quarantine',
+        url: input.url,
+        reason: 'Verified job board URL is not an individual vacancy listing',
+        provider: fingerprint.provider,
+        sourceClass: 'verified_board',
+      };
+    }
     const company = companyFromTitleOrHost(input.title, url.hostname);
     return {
       kind: 'source',
