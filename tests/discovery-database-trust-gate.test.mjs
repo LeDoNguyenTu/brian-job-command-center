@@ -52,3 +52,10 @@ test('database derives stable Workday and Manatal learned source names', () => {
   assert.match(sql, /careers-page\.com/i);
   assert.match(sql, /new\.company\s*:=\s*refined_name/i);
 });
+
+test('database canonicalizes Manatal legacy and advanced career-page roots', () => {
+  assert.match(sql, /normalize_discovery_source_canonical_url/i);
+  assert.match(sql, /provider_name\s*=\s*'manatal'/i);
+  assert.match(sql, /https:\/\/www\.careers-page\.com\//i);
+  assert.match(sql, /new\.employer_host\s*:=\s*'www\.careers-page\.com'/i);
+});
