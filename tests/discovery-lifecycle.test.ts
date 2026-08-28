@@ -89,12 +89,16 @@ test('failed source never ages or closes jobs', () => {
   assert.equal(result.missingUpdates.length, 0);
 });
 
-test('scheduled discovery leases one source per Edge invocation', () => {
-  assert.deepEqual(planDiscoveryRun('scheduled'), { sourceLimit: 1, runSourceDiscovery: false, dryRun: false });
+test('every discovery action leases at most one ATS source per Edge invocation', () => {
+  for (const action of ['scheduled', 'manual', 'dry-run', 'maintenance', 'diagnostic'] as const) {
+    assert.equal(planDiscoveryRun(action).sourceLimit, 1, action);
+  }
 });
 
-test('non-scheduled run planning remains bounded by action', () => {
-  assert.deepEqual(planDiscoveryRun('manual'), { sourceLimit: 30, runSourceDiscovery: true, dryRun: false });
-  assert.deepEqual(planDiscoveryRun('dry-run'), { sourceLimit: 20, runSourceDiscovery: true, dryRun: true });
-  assert.deepEqual(planDiscoveryRun('diagnostic'), { sourceLimit: 10, runSourceDiscovery: false, dryRun: true });
+test('source learning is explicit only for manual and dry-run actions', () => {
+  assert.equal(planDiscoveryRun('scheduled').runSourceDiscovery, false);
+  assert.equal(planDiscoveryRun('maintenance').runSourceDiscovery, false);
+  assert.equal(planDiscoveryRun('diagnostic').runSourceDiscovery, false);
+  assert.equal(planDiscoveryRun('manual').runSourceDiscovery, true);
+  assert.equal(planDiscoveryRun('dry-run').runSourceDiscovery, true);
 });
