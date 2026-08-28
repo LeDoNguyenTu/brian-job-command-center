@@ -48,15 +48,26 @@ const companyFromTitleOrHost = (title: string | undefined, hostname: string) => 
   return first ? humanizeSlug(first) : 'Unknown employer';
 };
 
+const manatalTenant = (url: URL) => {
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (hostname === 'careers-page.com') {
+    const tenant = parts[0];
+    return tenant && !/^(?:jobs?|careers?)$/i.test(tenant) ? tenant : null;
+  }
+  if (hostname.endsWith('.careers-page.com')) {
+    const tenant = hostname.slice(0, -'.careers-page.com'.length);
+    return tenant && tenant !== 'www' ? tenant : null;
+  }
+  return null;
+};
+
 const sourceSlug = (url: URL, provider: string) => {
   const parts = url.pathname.split('/').filter(Boolean);
   if (['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable', 'recruitee', 'teamtailor'].includes(provider)) {
     return parts[0] ?? null;
   }
-  if (provider === 'manatal') {
-    const hostname = url.hostname.toLowerCase();
-    return hostname.endsWith('.careers-page.com') ? hostname.slice(0, -'.careers-page.com'.length) || null : null;
-  }
+  if (provider === 'manatal') return manatalTenant(url);
   if (provider === 'workday') {
     const siteIndex = WORKDAY_LOCALE.test(parts[0] ?? '') ? 1 : 0;
     const rawSite = parts[siteIndex] ?? '';
@@ -139,6 +150,11 @@ export function canonicalizeDiscoverySourceRoot(value: string) {
       url.hash = '';
       return url.toString().replace(/\/$/, '');
     }
+  }
+
+  if (hostMatches(hostname, 'careers-page.com')) {
+    const tenant = manatalTenant(url);
+    if (tenant) return `https://www.careers-page.com/${tenant}`;
   }
 
   const careerIndex = parts.findIndex((part) => /^(jobs?|careers?|openings?|positions?|vacancies?|roles?)$/i.test(part));
