@@ -33,6 +33,12 @@ test('source discovery never turns raw web search hits directly into jobs', () =
   assert.match(block, /from\(['"]discovery_quarantine['"]\)/);
 });
 
+test('source provider failover continues until a trusted source is learned', () => {
+  assert.match(source, /let providerLearned = 0/);
+  assert.match(source, /if \(providerLearned > 0\) break/);
+  assert.doesNotMatch(source, /if \(providerHits > 0\) break/);
+});
+
 test('unknown employer sources require structured ownership evidence rather than self-verification', () => {
   assert.match(source, /hiringOrganization/);
   assert.match(source, /verifiedEmployerHosts/);
