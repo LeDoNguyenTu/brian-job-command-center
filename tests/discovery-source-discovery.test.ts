@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { proposeDiscoverySource } from '../supabase/functions/discover-jobs/pipeline/source-discovery.ts';
+import { canonicalizeDiscoverySourceRoot, proposeDiscoverySource } from '../supabase/functions/discover-jobs/pipeline/source-discovery.ts';
 
 test('search hit produces a source proposal rather than a job record', () => {
   const proposal = proposeDiscoverySource({
@@ -97,4 +97,11 @@ test('company names containing broad industry words are not mistaken for job tit
   assert.equal(proposal.kind, 'source');
   assert.equal(proposal.source.company, 'Abnormal Security');
   assert.equal(proposal.source.displayName, 'Abnormal Security');
+});
+
+test('Greenhouse hostname aliases collapse to one canonical discovery source root', () => {
+  const modern = canonicalizeDiscoverySourceRoot('https://job-boards.greenhouse.io/coupang/jobs/123?gh_src=abc');
+  const legacy = canonicalizeDiscoverySourceRoot('https://boards.greenhouse.io/coupang/jobs/456');
+  assert.equal(modern, 'https://job-boards.greenhouse.io/coupang');
+  assert.equal(legacy, modern);
 });
