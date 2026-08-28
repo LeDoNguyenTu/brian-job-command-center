@@ -43,8 +43,8 @@ export function assessSourceTrust(input: { url: string; verifiedEmployerHosts?: 
   if (matchesAny(hostname, HOSTED_ATS_SUFFIXES)) return { trusted: true, level: "official", reason: "Recognized recruitment infrastructure" };
 
   const verifiedRoots = (input.verifiedEmployerHosts ?? []).map((host) => host.toLowerCase().replace(/^www\./, ""));
-  if (verifiedRoots.some((root) => hostMatches(hostname, root))) {
-    return { trusted: true, level: "official", reason: "Verified employer host" };
+  if (verifiedRoots.some((root) => root !== hostname && hostname.endsWith(`.${root}`))) {
+    return { trusted: true, level: "official", reason: "Verified employer parent host" };
   }
 
   return { trusted: false, level: "untrusted", reason: "No employer ownership or recognized recruitment evidence" };
