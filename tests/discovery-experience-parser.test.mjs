@@ -18,6 +18,10 @@ test('parses lower bounds from required experience ranges', () => {
   assert.equal(requiredExperienceYears('Requirements Minimum 1 to 3 years of experience in IT support.'), 1);
 });
 
+test('parses required experience when a flattened heading precedes the numeric requirement', () => {
+  assert.equal(requiredExperienceYears('Experience 7+ years total engineering experience, with 3+ years in a senior/lead IC capacity.'), 7);
+});
+
 test('ignores clearly preferred experience ranges', () => {
   assert.equal(requiredExperienceYears('Requirements 1 year of Java experience. Preferred Experience 3-5 years with Pega.'), 1);
   assert.equal(requiredExperienceYears('Requirements 1 year of Java experience. 3+ years with Go preferred.'), 1);
