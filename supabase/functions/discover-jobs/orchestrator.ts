@@ -83,7 +83,8 @@ const requiredExperienceYears = (text: string) => {
     const hasRequiredContext = requiredIndex >= 0;
     const hasExperienceSuffix = /^\s*(?:of\s+)?(?:professional|commercial|industry|relevant|work|hands-on\s+)?experience\b/i.test(after);
     const hasImmediateRequiredPrefix = /\b(?:minimum(?: of)?|at least|requires?|required)\s*$/i.test(before.slice(-48));
-    if (!hasRequiredContext && !hasExperienceSuffix && !hasImmediateRequiredPrefix) continue;
+    const hasExperienceHeading = /(?:^|[.;:])\s*experience\s*$/i.test(before.slice(-64));
+    if (!hasRequiredContext && !hasExperienceSuffix && !hasImmediateRequiredPrefix && !hasExperienceHeading) continue;
 
     required = Math.max(required, Number(match[1]) || 0);
   }
