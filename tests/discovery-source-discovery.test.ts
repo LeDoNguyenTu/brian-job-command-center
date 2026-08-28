@@ -105,3 +105,25 @@ test('Greenhouse hostname aliases collapse to one canonical discovery source roo
   assert.equal(modern, 'https://job-boards.greenhouse.io/coupang');
   assert.equal(legacy, modern);
 });
+
+test('Workday source naming prefers a meaningful careers site slug over an opaque tenant hostname', () => {
+  const proposal = proposeDiscoverySource({
+    url: 'https://ffive.wd5.myworkdayjobs.com/en-US/f5jobs/job/Singapore/Software-Engineer_R123',
+    title: 'Software Engineer',
+    snippet: 'Singapore',
+  });
+  assert.equal(proposal.kind, 'source');
+  assert.equal(proposal.source.provider, 'workday');
+  assert.equal(proposal.source.company, 'F5');
+});
+
+test('Manatal source naming derives employer identity from the careers-page tenant, not a job code headline', () => {
+  const proposal = proposeDiscoverySource({
+    url: 'https://fpt-asia-pacific-pte-ltd.careers-page.com/jobs/1234',
+    title: 'G03',
+    snippet: 'Singapore',
+  });
+  assert.equal(proposal.kind, 'source');
+  assert.equal(proposal.source.provider, 'manatal');
+  assert.equal(proposal.source.company, 'Fpt Asia Pacific Pte Ltd');
+});
