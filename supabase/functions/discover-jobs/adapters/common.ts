@@ -3,7 +3,8 @@ import { normalizeJobMarkets } from '../core/markets.ts';
 import type { DiscoverySourceRecord, MarketCode, NormalizedJob } from '../core/types.ts';
 import type { FetchLike } from './types.ts';
 
-const MAX_RESPONSE_BYTES = 2_000_000;
+const MAX_HTML_RESPONSE_BYTES = 2_000_000;
+const MAX_JSON_RESPONSE_BYTES = 5_000_000;
 
 export const stripHtml = (value = '') => value
   .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -22,7 +23,7 @@ export const parseDate = (value: unknown): string | null => {
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 };
 
-export async function fetchText(fetcher: FetchLike, url: string, init?: RequestInit): Promise<{ text: string; status: number }> {
+export async function fetchText(fetcher: FetchLike, url: string, init?: RequestInit, maxResponseBytes = MAX_HTML_RESPONSE_BYTES): Promise<{ text: string; status: number }> {
   const response = await fetcher(url, {
     ...init,
     headers: { 'User-Agent': 'Brian-Job-Command-Center/2.0', ...(init?.headers ?? {}) },
@@ -30,13 +31,13 @@ export async function fetchText(fetcher: FetchLike, url: string, init?: RequestI
     redirect: 'follow',
   });
   const text = await response.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw new Error('Source response exceeds size limit');
+  if (new TextEncoder().encode(text).byteLength > maxResponseBytes) throw new Error('Source response exceeds size limit');
   if (!response.ok) throw Object.assign(new Error(`Source returned ${response.status}`), { status: response.status });
   return { text, status: response.status };
 }
 
 export async function fetchJson<T>(fetcher: FetchLike, url: string, init?: RequestInit): Promise<{ data: T; status: number }> {
-  const { text, status } = await fetchText(fetcher, url, init);
+  const { text, status } = await fetchText(fetcher, url, init, MAX_JSON_RESPONSE_BYTES);
   return { data: JSON.parse(text) as T, status };
 }
 
