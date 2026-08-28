@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { proposeDiscoverySource } from '../supabase/functions/discover-jobs/pipeline/source-discovery.ts';
+import { canonicalizeDiscoverySourceRoot, proposeDiscoverySource } from '../supabase/functions/discover-jobs/pipeline/source-discovery.ts';
 
 test('search hit produces a source proposal rather than a job record', () => {
   const proposal = proposeDiscoverySource({
@@ -97,4 +97,33 @@ test('company names containing broad industry words are not mistaken for job tit
   assert.equal(proposal.kind, 'source');
   assert.equal(proposal.source.company, 'Abnormal Security');
   assert.equal(proposal.source.displayName, 'Abnormal Security');
+});
+
+test('Greenhouse hostname aliases collapse to one canonical discovery source root', () => {
+  const modern = canonicalizeDiscoverySourceRoot('https://job-boards.greenhouse.io/coupang/jobs/123?gh_src=abc');
+  const legacy = canonicalizeDiscoverySourceRoot('https://boards.greenhouse.io/coupang/jobs/456');
+  assert.equal(modern, 'https://job-boards.greenhouse.io/coupang');
+  assert.equal(legacy, modern);
+});
+
+test('Workday source naming prefers a meaningful careers site slug over an opaque tenant hostname', () => {
+  const proposal = proposeDiscoverySource({
+    url: 'https://ffive.wd5.myworkdayjobs.com/en-US/f5jobs/job/Singapore/Software-Engineer_R123',
+    title: 'Software Engineer',
+    snippet: 'Singapore',
+  });
+  assert.equal(proposal.kind, 'source');
+  assert.equal(proposal.source.provider, 'workday');
+  assert.equal(proposal.source.company, 'F5');
+});
+
+test('Manatal source naming derives employer identity from the careers-page tenant, not a job code headline', () => {
+  const proposal = proposeDiscoverySource({
+    url: 'https://fpt-asia-pacific-pte-ltd.careers-page.com/jobs/1234',
+    title: 'G03',
+    snippet: 'Singapore',
+  });
+  assert.equal(proposal.kind, 'source');
+  assert.equal(proposal.source.provider, 'manatal');
+  assert.equal(proposal.source.company, 'Fpt Asia Pacific Pte Ltd');
 });

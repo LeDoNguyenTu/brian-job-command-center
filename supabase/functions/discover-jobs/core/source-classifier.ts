@@ -21,6 +21,7 @@ const RULES: FingerprintRule[] = [
   { provider: "lever", adapter: "lever", sourceClass: "direct_structured", host: /(?:^|\.)lever\.co$/i },
   { provider: "ashby", adapter: "ashby", sourceClass: "direct_structured", host: /(?:^|\.)ashbyhq\.com$/i },
   { provider: "smartrecruiters", adapter: "smartrecruiters", sourceClass: "direct_structured", host: /(?:^|\.)smartrecruiters\.com$/i },
+  { provider: "manatal", adapter: "manatal", sourceClass: "direct_structured", host: /(?:^|\.)careers-page\.com$/i },
   { provider: "successfactors", adapter: "generic_employer_html", sourceClass: "generic_employer", host: /(?:^|\.)(?:successfactors\.com|successfactors\.eu)$/i, html: /successfactors\.(?:com|eu)|career\d*\.successfactors/i },
   { provider: "oracle", adapter: "generic_employer_html", sourceClass: "generic_employer", host: /(?:^|\.)(?:taleo\.net|oraclecloud\.com)$/i, html: /hcmUI\/CandidateExperience|oraclecloud|taleo/i },
   { provider: "icims", adapter: "generic_employer_html", sourceClass: "generic_employer", host: /(?:^|\.)icims\.com$/i, html: /(?:^|[./])icims\.com|icims/i },
@@ -34,7 +35,6 @@ const RULES: FingerprintRule[] = [
   { provider: "phenom", adapter: "generic_employer_html", sourceClass: "generic_employer", host: /(?:^|\.)phenompeople\.com$/i },
   { provider: "eightfold", adapter: "generic_employer_html", sourceClass: "generic_employer", host: /(?:^|\.)eightfold\.ai$/i },
   { provider: "personio", adapter: "generic_employer_html", sourceClass: "generic_employer", host: /(?:^|\.)personio\.(?:com|de)$/i },
-  { provider: "manatal", adapter: "generic_employer_html", sourceClass: "generic_employer", host: /(?:^|\.)careers-page\.com$/i },
 ];
 
 const boardHost = (hostname: string) => BOARD_SUFFIXES.some((root) => hostMatches(hostname, root));

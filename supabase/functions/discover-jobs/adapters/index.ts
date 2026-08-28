@@ -6,6 +6,7 @@ import { fetchLever } from './lever.ts';
 import { fetchAshby } from './ashby.ts';
 import { fetchSmartRecruiters } from './smartrecruiters.ts';
 import { fetchWorkday } from './workday.ts';
+import { fetchManatal } from './manatal.ts';
 import { fetchJsonLd } from './jsonld.ts';
 import { fetchEmbeddedJson } from './embedded-json.ts';
 import { fetchGenericEmployerHtml } from './generic-employer-html.ts';
@@ -19,6 +20,7 @@ export async function fetchSourceJobs(source: DiscoverySourceRecord, fetcher: Fe
       case 'ashby': return await fetchAshby(source, fetcher);
       case 'smartrecruiters': return await fetchSmartRecruiters(source, fetcher);
       case 'workday': return await fetchWorkday(source, fetcher);
+      case 'manatal': return await fetchManatal(source, fetcher);
       case 'jsonld': return await fetchJsonLd(source, fetcher);
       case 'embedded_json': return await fetchEmbeddedJson(source, fetcher);
       case 'generic_employer_html': return await fetchGenericEmployerHtml(source, fetcher);

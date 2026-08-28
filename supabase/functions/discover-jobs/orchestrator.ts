@@ -64,16 +64,29 @@ function localClock(timeZone: string) {
 }
 
 const requiredExperienceYears = (text: string) => {
+  const normalized = text.replace(/[–—]/g, '-').replace(/\s+/g, ' ');
+  const requiredCue = /\b(?:requirements?|required skills?|must(?:\s+have)?|minimum(?: of)?|at least|requires?|required)\b/gi;
+  const preferredCue = /\b(?:preferred|nice to have|bonus|advantage|optional|plus but not required)\b/gi;
+  const candidate = /\b(\d+)\s*(?:\+|-\s*\d+|to\s+\d+)?\s*(?:years?|yrs?|yoe)\b/gi;
+
   let required = 0;
-  for (const sentence of text.split(/[.!?\n]+/)) {
-    if (/preferred|nice to have|bonus|advantage|plus but not required/i.test(sentence)) continue;
-    for (const pattern of [
-      /\b(?:minimum(?: of)?|at least|requires?|required)\s*(\d+)\s*\+?\s*(?:years?|yrs?)\b/gi,
-      /\b(\d+)\s*\+\s*(?:years?|yrs?|yoe)\b/gi,
-      /\b(\d+)\s*(?:years?|yrs?|yoe)\s+(?:of\s+)?(?:professional|commercial|industry|relevant|work|hands-on)\s+experience\b/gi,
-    ]) {
-      for (const match of sentence.matchAll(pattern)) required = Math.max(required, Number(match[1]) || 0);
-    }
+  for (const match of normalized.matchAll(candidate)) {
+    const start = match.index ?? 0;
+    const before = normalized.slice(Math.max(0, start - 180), start);
+    const after = normalized.slice(start + match[0].length, start + match[0].length + 48);
+    const requiredIndex = Array.from(before.matchAll(requiredCue)).at(-1)?.index ?? -1;
+    const preferredIndex = Array.from(before.matchAll(preferredCue)).at(-1)?.index ?? -1;
+    if (preferredIndex > requiredIndex) continue;
+    if (/^[^.;]{0,36}\bpreferred\b(?!\s+experience\b)/i.test(after)
+      || /^[^.;]{0,36}\b(?:nice to have|bonus|advantage|optional|a plus)\b/i.test(after)) continue;
+
+    const hasRequiredContext = requiredIndex >= 0;
+    const hasExperienceSuffix = /^\s*(?:of\s+)?(?:professional|commercial|industry|relevant|work|hands-on\s+)?experience\b/i.test(after);
+    const hasImmediateRequiredPrefix = /\b(?:minimum(?: of)?|at least|requires?|required)\s*$/i.test(before.slice(-48));
+    const hasExperienceHeading = /(?:^|[.;:])\s*experience\s*$/i.test(before.slice(-64));
+    if (!hasRequiredContext && !hasExperienceSuffix && !hasImmediateRequiredPrefix && !hasExperienceHeading) continue;
+
+    required = Math.max(required, Number(match[1]) || 0);
   }
   return required;
 };

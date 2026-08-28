@@ -14,6 +14,7 @@ export const stripHtml = (value = '') => value
   .replace(/&amp;/gi, '&')
   .replace(/&quot;|&#34;/gi, '"')
   .replace(/&#39;|&apos;/gi, "'")
+  .replace(/&#43;|&#x2b;|&plus;/gi, '+')
   .replace(/\s+/g, ' ')
   .trim();
 

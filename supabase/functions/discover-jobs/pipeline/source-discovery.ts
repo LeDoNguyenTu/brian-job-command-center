@@ -34,6 +34,8 @@ export type SourceProposal = {
 };
 
 const ROLE_LIKE_TITLE = /\b(?:engineer|developer|analyst|architect|intern|graduate|junior|senior|manager|specialist|consultant|support|devops|sre|programmer|technician)\b/i;
+const WORKDAY_LOCALE = /^[a-z]{2}-[A-Z]{2}$/;
+const GENERIC_WORKDAY_SITE = /^(?:external|careers?|jobs?|opportunities|career-site)$/i;
 
 const humanizeSlug = (slug: string) => slug
   .replace(/[-_]+/g, ' ')
@@ -46,12 +48,34 @@ const companyFromTitleOrHost = (title: string | undefined, hostname: string) => 
   return first ? humanizeSlug(first) : 'Unknown employer';
 };
 
+const manatalTenant = (url: URL) => {
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (hostname === 'careers-page.com') {
+    const tenant = parts[0];
+    return tenant && !/^(?:jobs?|careers?)$/i.test(tenant) ? tenant : null;
+  }
+  if (hostname.endsWith('.careers-page.com')) {
+    const tenant = hostname.slice(0, -'.careers-page.com'.length);
+    return tenant && tenant !== 'www' ? tenant : null;
+  }
+  return null;
+};
+
 const sourceSlug = (url: URL, provider: string) => {
   const parts = url.pathname.split('/').filter(Boolean);
   if (['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable', 'recruitee', 'teamtailor'].includes(provider)) {
     return parts[0] ?? null;
   }
+  if (provider === 'manatal') return manatalTenant(url);
   if (provider === 'workday') {
+    const siteIndex = WORKDAY_LOCALE.test(parts[0] ?? '') ? 1 : 0;
+    const rawSite = parts[siteIndex] ?? '';
+    if (rawSite && !GENERIC_WORKDAY_SITE.test(rawSite)) {
+      const withoutSuffix = rawSite.replace(/(?:careers?|jobs?)$/i, '');
+      if (withoutSuffix.length >= 2) return withoutSuffix;
+      return rawSite;
+    }
     return url.hostname.split('.')[0] || null;
   }
   return null;
@@ -59,11 +83,86 @@ const sourceSlug = (url: URL, provider: string) => {
 
 const companyForRecruitmentSource = (title: string | undefined, url: URL, provider: string) => {
   const slug = sourceSlug(url, provider);
-  if (slug && (!title || ROLE_LIKE_TITLE.test(title))) return humanizeSlug(slug);
+  if (slug && (provider === 'manatal' || !title || ROLE_LIKE_TITLE.test(title))) return humanizeSlug(slug);
   return companyFromTitleOrHost(title, url.hostname);
 };
 
 const hostMatches = (hostname: string, root: string) => hostname === root || hostname.endsWith(`.${root}`);
+
+export function canonicalizeDiscoverySourceRoot(value: string) {
+  const url = new URL(value);
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+  const parts = url.pathname.split('/').filter(Boolean);
+
+  if (hostMatches(hostname, 'indeed.com')) {
+    const jk = url.searchParams.get('jk');
+    url.hash = '';
+    url.search = jk ? `?jk=${encodeURIComponent(jk)}` : '';
+    return url.toString().replace(/\/$/, '');
+  }
+
+  if (hostMatches(hostname, 'greenhouse.io')) {
+    url.protocol = 'https:';
+    url.hostname = 'job-boards.greenhouse.io';
+    url.port = '';
+    url.pathname = parts[0] ? `/${parts[0]}` : '/';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  }
+
+  if (hostMatches(hostname, 'lever.co')) {
+    url.protocol = 'https:';
+    url.hostname = 'jobs.lever.co';
+    url.port = '';
+    url.pathname = parts[0] ? `/${parts[0]}` : '/';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  }
+
+  if (hostMatches(hostname, 'ashbyhq.com')) {
+    url.protocol = 'https:';
+    url.hostname = 'jobs.ashbyhq.com';
+    url.port = '';
+    url.pathname = parts[0] ? `/${parts[0]}` : '/';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  }
+
+  if (hostMatches(hostname, 'smartrecruiters.com')) {
+    url.protocol = 'https:';
+    url.hostname = 'careers.smartrecruiters.com';
+    url.port = '';
+    url.pathname = parts[0] ? `/${parts[0]}` : '/';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  }
+
+  if (hostMatches(hostname, 'myworkdayjobs.com')) {
+    const locale = WORKDAY_LOCALE.test(parts[0] ?? '') ? parts[0] : 'en-US';
+    const site = WORKDAY_LOCALE.test(parts[0] ?? '') ? parts[1] : parts[0];
+    if (site) {
+      url.pathname = `/${locale}/${site}`;
+      url.search = '';
+      url.hash = '';
+      return url.toString().replace(/\/$/, '');
+    }
+  }
+
+  if (hostMatches(hostname, 'careers-page.com')) {
+    const tenant = manatalTenant(url);
+    if (tenant) return `https://www.careers-page.com/${tenant}`;
+  }
+
+  const careerIndex = parts.findIndex((part) => /^(jobs?|careers?|openings?|positions?|vacancies?|roles?)$/i.test(part));
+  if (careerIndex >= 0) url.pathname = '/' + parts.slice(0, careerIndex + 1).join('/');
+  url.search = '';
+  url.hash = '';
+  return url.toString().replace(/\/$/, '');
+}
 
 function isIndividualBoardListing(url: URL) {
   const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
@@ -155,7 +254,7 @@ export function proposeDiscoverySource(input: SearchSourceCandidate): SourceProp
     source: {
       company,
       displayName: company,
-      canonicalUrl: url.toString().replace(/\/$/, ''),
+      canonicalUrl: canonicalizeDiscoverySourceRoot(input.url),
       employerHost: input.verifiedEmployerHosts?.[0] ?? url.hostname,
       sourceClass: fingerprint.sourceClass as Exclude<SourceClass, 'quarantine'>,
       provider: fingerprint.provider,

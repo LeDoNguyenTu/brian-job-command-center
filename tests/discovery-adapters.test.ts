@@ -19,25 +19,56 @@ const source = (adapter: string, canonicalUrl: string, provider = adapter) => ({
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const htmlResponse = (body: string, status = 200) => new Response(body, { status, headers: { 'content-type': 'text/html' } });
 
-test('Greenhouse adapter emits verified normalized jobs', async () => {
+test('Greenhouse adapter lists first and fetches details only for source-market jobs', async () => {
+  const calls: string[] = [];
   const fetcher = async (input: RequestInfo | URL) => {
-    assert.match(String(input), /boards-api\.greenhouse\.io\/v1\/boards\/acme\/jobs/);
-    return jsonResponse({ jobs: [{ id: 42, title: 'Software Engineer', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/42', content: '<p>Build APIs</p>', location: { name: 'Singapore' }, updated_at: '2026-08-27T00:00:00Z' }] });
+    const url = String(input);
+    calls.push(url);
+    if (url === 'https://boards-api.greenhouse.io/v1/boards/acme/jobs') {
+      return jsonResponse({ jobs: [
+        { id: 42, title: 'Software Engineer', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/42', location: { name: 'Singapore' }, updated_at: '2026-08-27T00:00:00Z' },
+        { id: 99, title: 'Software Engineer', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/99', location: { name: 'Seattle, WA' }, updated_at: '2026-08-27T00:00:00Z' },
+      ] });
+    }
+    if (url === 'https://boards-api.greenhouse.io/v1/boards/acme/jobs/42') {
+      return jsonResponse({ id: 42, title: 'Software Engineer', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/42', content: '<p>Build APIs</p>', location: { name: 'Singapore' }, first_published: '2026-08-20T00:00:00Z' });
+    }
+    throw new Error(`Unexpected Greenhouse request: ${url}`);
   };
   const result = await fetchSourceJobs(source('greenhouse', 'https://job-boards.greenhouse.io/acme'), fetcher as typeof fetch);
   assert.equal(result.status, 'success');
+  assert.equal(result.jobs.length, 1);
   assert.equal(result.jobs[0].providerJobId, '42');
   assert.equal(result.jobs[0].availabilityStatus, 'verified_open');
   assert.equal(result.jobs[0].descriptionText, 'Build APIs');
+  assert.equal(result.jobs[0].postedAt, '2026-08-20T00:00:00.000Z');
+  assert.equal(calls.some((url) => url.includes('content=true')), false);
+  assert.equal(calls.includes('https://boards-api.greenhouse.io/v1/boards/acme/jobs/99'), false);
 });
 
-test('structured ATS JSON accepts a bounded enterprise feed above the HTML response cap', async () => {
-  const largeDescription = 'A'.repeat(7_000_000);
-  const fetcher = async () => jsonResponse({ jobs: [{ id: 77, title: 'Software Engineer', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/77', content: largeDescription, location: { name: 'Singapore' } }] });
+test('large Greenhouse boards do not fetch descriptions for unrelated markets', async () => {
+  const listings = Array.from({ length: 800 }, (_, index) => ({
+    id: index + 1,
+    title: 'Software Engineer',
+    absolute_url: `https://job-boards.greenhouse.io/acme/jobs/${index + 1}`,
+    location: { name: 'Seattle, WA' },
+  }));
+  listings.push({ id: 9001, title: 'Software Engineer', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/9001', location: { name: 'Singapore' } });
+  let detailRequests = 0;
+  const fetcher = async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === 'https://boards-api.greenhouse.io/v1/boards/acme/jobs') return jsonResponse({ jobs: listings });
+    if (url === 'https://boards-api.greenhouse.io/v1/boards/acme/jobs/9001') {
+      detailRequests += 1;
+      return jsonResponse({ id: 9001, title: 'Software Engineer', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/9001', content: '<p>Build Singapore systems</p>', location: { name: 'Singapore' } });
+    }
+    throw new Error(`Unexpected Greenhouse detail fetch: ${url}`);
+  };
   const result = await fetchSourceJobs(source('greenhouse', 'https://job-boards.greenhouse.io/acme'), fetcher as typeof fetch);
   assert.equal(result.status, 'success');
   assert.equal(result.jobs.length, 1);
-  assert.equal(result.jobs[0].providerJobId, '77');
+  assert.equal(result.jobs[0].providerJobId, '9001');
+  assert.equal(detailRequests, 1);
 });
 
 test('Lever adapter emits verified normalized jobs', async () => {

@@ -5,6 +5,7 @@ import SettingsFunctionListEnhancer from "./settings-function-list";
 import SourceFirstUiEnhancer from "./source-first-ui-enhancer";
 import "./globals.css";
 import "./settings-function-list.css";
+import "./visual-polish.css";
 
 export const metadata: Metadata = {
   title: "Brian Job Command Center",

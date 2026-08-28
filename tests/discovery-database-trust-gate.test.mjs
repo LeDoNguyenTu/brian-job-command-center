@@ -36,3 +36,26 @@ test('database refines source-name detection without treating industry words as 
   assert.match(sql, /refine_web_discovery_source_names/i);
   assert.match(sql, /engineer\|developer\|analyst/i);
 });
+
+test('database canonicalizes Greenhouse source aliases before unique URL enforcement', () => {
+  assert.match(sql, /normalize_discovery_source_canonical_url/i);
+  assert.match(sql, /boards\.greenhouse\.io/i);
+  assert.match(sql, /job-boards\.greenhouse\.io/i);
+  assert.match(sql, /new\.canonical_url/i);
+});
+
+test('database derives stable Workday and Manatal learned source names', () => {
+  assert.match(sql, /refine_discovery_provider_source_name/i);
+  assert.match(sql, /provider_name\s*=\s*'workday'/i);
+  assert.match(sql, /myworkdayjobs\.com/i);
+  assert.match(sql, /provider_name\s*=\s*'manatal'/i);
+  assert.match(sql, /careers-page\.com/i);
+  assert.match(sql, /new\.company\s*:=\s*refined_name/i);
+});
+
+test('database canonicalizes Manatal legacy and advanced career-page roots', () => {
+  assert.match(sql, /normalize_discovery_source_canonical_url/i);
+  assert.match(sql, /provider_name\s*=\s*'manatal'/i);
+  assert.match(sql, /https:\/\/www\.careers-page\.com\//i);
+  assert.match(sql, /new\.employer_host\s*:=\s*'www\.careers-page\.com'/i);
+});
