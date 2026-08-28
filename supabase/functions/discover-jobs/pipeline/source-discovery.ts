@@ -225,7 +225,7 @@ export function proposeDiscoverySource(input: SearchSourceCandidate): SourceProp
     source: {
       company,
       displayName: company,
-      canonicalUrl: url.toString().replace(/\/$/, ''),
+      canonicalUrl: canonicalizeDiscoverySourceRoot(input.url),
       employerHost: input.verifiedEmployerHosts?.[0] ?? url.hostname,
       sourceClass: fingerprint.sourceClass as Exclude<SourceClass, 'quarantine'>,
       provider: fingerprint.provider,
