@@ -34,6 +34,8 @@ export type SourceProposal = {
 };
 
 const ROLE_LIKE_TITLE = /\b(?:engineer|developer|analyst|architect|intern|graduate|junior|senior|manager|specialist|consultant|support|devops|sre|programmer|technician)\b/i;
+const WORKDAY_LOCALE = /^[a-z]{2}-[A-Z]{2}$/;
+const GENERIC_WORKDAY_SITE = /^(?:external|careers?|jobs?|opportunities|career-site)$/i;
 
 const humanizeSlug = (slug: string) => slug
   .replace(/[-_]+/g, ' ')
@@ -51,7 +53,18 @@ const sourceSlug = (url: URL, provider: string) => {
   if (['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable', 'recruitee', 'teamtailor'].includes(provider)) {
     return parts[0] ?? null;
   }
+  if (provider === 'manatal') {
+    const hostname = url.hostname.toLowerCase();
+    return hostname.endsWith('.careers-page.com') ? hostname.slice(0, -'.careers-page.com'.length) || null : null;
+  }
   if (provider === 'workday') {
+    const siteIndex = WORKDAY_LOCALE.test(parts[0] ?? '') ? 1 : 0;
+    const rawSite = parts[siteIndex] ?? '';
+    if (rawSite && !GENERIC_WORKDAY_SITE.test(rawSite)) {
+      const withoutSuffix = rawSite.replace(/(?:careers?|jobs?)$/i, '');
+      if (withoutSuffix.length >= 2) return withoutSuffix;
+      return rawSite;
+    }
     return url.hostname.split('.')[0] || null;
   }
   return null;
@@ -59,7 +72,7 @@ const sourceSlug = (url: URL, provider: string) => {
 
 const companyForRecruitmentSource = (title: string | undefined, url: URL, provider: string) => {
   const slug = sourceSlug(url, provider);
-  if (slug && (!title || ROLE_LIKE_TITLE.test(title))) return humanizeSlug(slug);
+  if (slug && (provider === 'manatal' || !title || ROLE_LIKE_TITLE.test(title))) return humanizeSlug(slug);
   return companyFromTitleOrHost(title, url.hostname);
 };
 
@@ -118,8 +131,8 @@ export function canonicalizeDiscoverySourceRoot(value: string) {
   }
 
   if (hostMatches(hostname, 'myworkdayjobs.com')) {
-    const locale = /^[a-z]{2}-[A-Z]{2}$/.test(parts[0] ?? '') ? parts[0] : 'en-US';
-    const site = /^[a-z]{2}-[A-Z]{2}$/.test(parts[0] ?? '') ? parts[1] : parts[0];
+    const locale = WORKDAY_LOCALE.test(parts[0] ?? '') ? parts[0] : 'en-US';
+    const site = WORKDAY_LOCALE.test(parts[0] ?? '') ? parts[1] : parts[0];
     if (site) {
       url.pathname = `/${locale}/${site}`;
       url.search = '';
