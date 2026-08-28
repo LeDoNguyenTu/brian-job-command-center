@@ -107,6 +107,6 @@ export function planDiscoveryRun(action: DiscoveryAction) {
     case 'dry-run': return { sourceLimit: 20, runSourceDiscovery: true, dryRun: true };
     case 'maintenance': return { sourceLimit: 20, runSourceDiscovery: false, dryRun: false };
     case 'diagnostic': return { sourceLimit: 10, runSourceDiscovery: false, dryRun: true };
-    default: return { sourceLimit: 10, runSourceDiscovery: false, dryRun: false };
+    default: return { sourceLimit: 1, runSourceDiscovery: false, dryRun: false };
   }
 }
