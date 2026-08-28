@@ -7,9 +7,12 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run verify && next build",
     "start": "next start",
-    "test": "npm run build && node --test tests/app-source.test.mjs",
+    "test": "npm run verify",
+    "verify": "npm run lint && npm run test:source-first",
+    "test:discovery": "node --experimental-strip-types --test tests/discovery-*.test.ts",
+    "test:source-first": "npm run test:discovery && node --test tests/discovery-*.test.mjs tests/settings-function-list.test.mjs tests/source-first-ui-labels.test.mjs",
     "lint": "eslint . --ignore-pattern .next --ignore-pattern .vercel --ignore-pattern dist --ignore-pattern .sites-runtime --ignore-pattern .wrangler"
   },
   "dependencies": {
