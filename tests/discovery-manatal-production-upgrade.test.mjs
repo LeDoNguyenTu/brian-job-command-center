@@ -16,7 +16,7 @@ test('existing Manatal sources are promoted to the structured adapter', () => {
 });
 
 test('Manatal promotion preserves JSONB fingerprint evidence using JSONB operators', () => {
-  const migration = fs.readFileSync(path.join(migrationDir, '20260828211000_promote_manatal_structured_adapter.sql'), 'utf8');
+  const migration = fs.readFileSync(path.join(migrationDir, '20260828230110_promote_manatal_structured_adapter.sql'), 'utf8');
   assert.doesNotMatch(migration, /::text\[\]/i);
   assert.match(migration, /coalesce\(fingerprint_evidence,\s*'\[\]'::jsonb\)/i);
   assert.match(migration, /\|\|\s*'\["host:manatal"\]'::jsonb/i);
