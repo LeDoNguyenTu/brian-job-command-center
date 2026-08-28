@@ -76,3 +76,14 @@ test('linkedin individual job URLs remain eligible verified-board sources', () =
   assert.equal(proposal.kind, 'source');
   assert.equal(proposal.source.sourceClass, 'verified_board');
 });
+
+test('learned ATS sources derive employer name from the stable source slug, not the job headline', () => {
+  const proposal = proposeDiscoverySource({
+    url: 'https://job-boards.greenhouse.io/guardsquare',
+    title: 'Java Software Engineer (Singapore)',
+    snippet: 'Singapore opening',
+  });
+  assert.equal(proposal.kind, 'source');
+  assert.equal(proposal.source.company, 'Guardsquare');
+  assert.equal(proposal.source.displayName, 'Guardsquare');
+});
