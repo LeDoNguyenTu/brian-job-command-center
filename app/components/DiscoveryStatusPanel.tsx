@@ -77,6 +77,7 @@ export default function DiscoveryStatusPanel() {
   const [quarantineCount, setQuarantineCount] = useState(0);
   const [verifiedJobs, setVerifiedJobs] = useState<VerifiedJob[]>([]);
   const [verifiedCount, setVerifiedCount] = useState(0);
+  const [clockNow, setClockNow] = useState(0);
 
   const load = useCallback(async () => {
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -132,19 +133,23 @@ export default function DiscoveryStatusPanel() {
   }, []);
 
   useEffect(() => {
-    void load();
+    const initialLoad = window.setTimeout(() => void load(), 0);
+    const initialClock = window.setTimeout(() => setClockNow(Date.now()), 0);
+    const clock = window.setInterval(() => setClockNow(Date.now()), 30_000);
     const { data } = supabase.auth.onAuthStateChange(() => {
       window.setTimeout(() => void load(), 0);
     });
-    return () => data.subscription.unsubscribe();
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearTimeout(initialClock);
+      window.clearInterval(clock);
+      data.subscription.unsubscribe();
+    };
   }, [load]);
 
   const healthyCount = useMemo(() => sources.filter((source) => source.enabled && source.last_success_at && source.consecutive_failures === 0).length, [sources]);
   const failingCount = useMemo(() => sources.filter((source) => source.enabled && source.consecutive_failures > 0).length, [sources]);
-  const dueCount = useMemo(() => {
-    const now = Date.now();
-    return sources.filter((source) => source.enabled && Date.parse(source.next_crawl_at) <= now).length;
-  }, [sources]);
+  const dueCount = useMemo(() => sources.filter((source) => source.enabled && clockNow > 0 && Date.parse(source.next_crawl_at) <= clockNow).length, [clockNow, sources]);
 
   const toggleMarket = (code: MarketCode) => {
     setMarkets((current) => current.includes(code)
