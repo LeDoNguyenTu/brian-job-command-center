@@ -65,6 +65,76 @@ const companyForRecruitmentSource = (title: string | undefined, url: URL, provid
 
 const hostMatches = (hostname: string, root: string) => hostname === root || hostname.endsWith(`.${root}`);
 
+export function canonicalizeDiscoverySourceRoot(value: string) {
+  const url = new URL(value);
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+  const parts = url.pathname.split('/').filter(Boolean);
+
+  if (hostMatches(hostname, 'indeed.com')) {
+    const jk = url.searchParams.get('jk');
+    url.hash = '';
+    url.search = jk ? `?jk=${encodeURIComponent(jk)}` : '';
+    return url.toString().replace(/\/$/, '');
+  }
+
+  if (hostMatches(hostname, 'greenhouse.io')) {
+    url.protocol = 'https:';
+    url.hostname = 'job-boards.greenhouse.io';
+    url.port = '';
+    url.pathname = parts[0] ? `/${parts[0]}` : '/';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  }
+
+  if (hostMatches(hostname, 'lever.co')) {
+    url.protocol = 'https:';
+    url.hostname = 'jobs.lever.co';
+    url.port = '';
+    url.pathname = parts[0] ? `/${parts[0]}` : '/';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  }
+
+  if (hostMatches(hostname, 'ashbyhq.com')) {
+    url.protocol = 'https:';
+    url.hostname = 'jobs.ashbyhq.com';
+    url.port = '';
+    url.pathname = parts[0] ? `/${parts[0]}` : '/';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  }
+
+  if (hostMatches(hostname, 'smartrecruiters.com')) {
+    url.protocol = 'https:';
+    url.hostname = 'careers.smartrecruiters.com';
+    url.port = '';
+    url.pathname = parts[0] ? `/${parts[0]}` : '/';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  }
+
+  if (hostMatches(hostname, 'myworkdayjobs.com')) {
+    const locale = /^[a-z]{2}-[A-Z]{2}$/.test(parts[0] ?? '') ? parts[0] : 'en-US';
+    const site = /^[a-z]{2}-[A-Z]{2}$/.test(parts[0] ?? '') ? parts[1] : parts[0];
+    if (site) {
+      url.pathname = `/${locale}/${site}`;
+      url.search = '';
+      url.hash = '';
+      return url.toString().replace(/\/$/, '');
+    }
+  }
+
+  const careerIndex = parts.findIndex((part) => /^(jobs?|careers?|openings?|positions?|vacancies?|roles?)$/i.test(part));
+  if (careerIndex >= 0) url.pathname = '/' + parts.slice(0, careerIndex + 1).join('/');
+  url.search = '';
+  url.hash = '';
+  return url.toString().replace(/\/$/, '');
+}
+
 function isIndividualBoardListing(url: URL) {
   const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
   const path = url.pathname;
