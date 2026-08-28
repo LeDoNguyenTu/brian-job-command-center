@@ -1,6 +1,6 @@
 import { canonicalizeJobIdentity } from '../core/identity.ts';
 import { normalizeJobMarkets } from '../core/markets.ts';
-import type { DiscoverySourceRecord, MarketCode, NormalizedJob } from '../core/types.ts';
+import type { DiscoverySourceRecord, NormalizedJob } from '../core/types.ts';
 import type { FetchLike } from './types.ts';
 
 const MAX_HTML_RESPONSE_BYTES = 2_000_000;
@@ -80,7 +80,7 @@ export function normalizedJob(source: DiscoverySourceRecord, input: {
     company: input.company?.trim() || source.company,
     title: input.title.trim(),
     locations,
-    countryCodes: countryCodes.length ? countryCodes : source.marketCodes as MarketCode[],
+    countryCodes,
     employmentType: input.employmentType?.trim() || null,
     descriptionText: (input.descriptionText ?? '').slice(0, 60_000),
     postedAt: input.postedAt ?? null,
