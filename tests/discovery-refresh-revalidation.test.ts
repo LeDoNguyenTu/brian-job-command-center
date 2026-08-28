@@ -49,8 +49,9 @@ test('refresh operations retain the current normalized vacancy and existing pipe
 
 test('orchestrator revalidates untouched discovered refreshes and blocks newly ineligible jobs', () => {
   const source = fs.readFileSync('supabase/functions/discover-jobs/orchestrator.ts', 'utf8');
+  assert.match(source, /const currentJob = refresh\.currentJob/);
   assert.match(source, /refresh\.existingPipeline === 'Discovered'/);
-  assert.match(source, /assessEligibility\(\{[\s\S]*refresh\.currentJob\.countryCodes[\s\S]*refresh\.currentJob\.title[\s\S]*refresh\.currentJob\.descriptionText/);
-  assert.match(source, /pipeline:\s*'Blocked'/);
-  assert.match(source, /approved_to_apply:\s*false/);
+  assert.match(source, /assessEligibility\(\{[\s\S]*currentJob\.countryCodes[\s\S]*currentJob\.title[\s\S]*currentJob\.descriptionText/);
+  assert.match(source, /refreshUpdate\.pipeline = 'Blocked'/);
+  assert.match(source, /refreshUpdate\.approved_to_apply = false/);
 });
