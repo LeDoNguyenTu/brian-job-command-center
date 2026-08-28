@@ -33,11 +33,34 @@ export type SourceProposal = {
   sourceClass: SourceClass;
 };
 
+const ROLE_LIKE_TITLE = /\b(?:engineer|developer|analyst|architect|intern|graduate|junior|senior|manager|specialist|consultant|support|devops|sre|software|cyber|security|cloud|data|programmer|technician)\b/i;
+
+const humanizeSlug = (slug: string) => slug
+  .replace(/[-_]+/g, ' ')
+  .replace(/\b\w/g, (character) => character.toUpperCase());
+
 const companyFromTitleOrHost = (title: string | undefined, hostname: string) => {
   const titleCompany = title?.split(/\s[-|:]\s| careers?\b| jobs?\b/i)[0]?.trim();
   if (titleCompany && titleCompany.length >= 2 && titleCompany.length <= 120) return titleCompany;
   const first = hostname.replace(/^www\.|^careers\.|^jobs\./, '').split('.')[0];
-  return first ? first.replace(/[-_]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()) : 'Unknown employer';
+  return first ? humanizeSlug(first) : 'Unknown employer';
+};
+
+const sourceSlug = (url: URL, provider: string) => {
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable', 'recruitee', 'teamtailor'].includes(provider)) {
+    return parts[0] ?? null;
+  }
+  if (provider === 'workday') {
+    return url.hostname.split('.')[0] || null;
+  }
+  return null;
+};
+
+const companyForRecruitmentSource = (title: string | undefined, url: URL, provider: string) => {
+  const slug = sourceSlug(url, provider);
+  if (slug && (!title || ROLE_LIKE_TITLE.test(title))) return humanizeSlug(slug);
+  return companyFromTitleOrHost(title, url.hostname);
 };
 
 const hostMatches = (hostname: string, root: string) => hostname === root || hostname.endsWith(`.${root}`);
@@ -126,7 +149,7 @@ export function proposeDiscoverySource(input: SearchSourceCandidate): SourceProp
     };
   }
 
-  const company = companyFromTitleOrHost(input.title, url.hostname);
+  const company = companyForRecruitmentSource(input.title, url, fingerprint.provider);
   return {
     kind: 'source',
     source: {
