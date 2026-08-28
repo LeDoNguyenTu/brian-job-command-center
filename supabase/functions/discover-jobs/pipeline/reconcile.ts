@@ -103,10 +103,10 @@ export function reconcileSourceSnapshot(input: SnapshotInput) {
 export type DiscoveryAction = 'scheduled' | 'manual' | 'dry-run' | 'maintenance' | 'diagnostic';
 export function planDiscoveryRun(action: DiscoveryAction) {
   switch (action) {
-    case 'manual': return { sourceLimit: 30, runSourceDiscovery: true, dryRun: false };
-    case 'dry-run': return { sourceLimit: 20, runSourceDiscovery: true, dryRun: true };
-    case 'maintenance': return { sourceLimit: 20, runSourceDiscovery: false, dryRun: false };
-    case 'diagnostic': return { sourceLimit: 10, runSourceDiscovery: false, dryRun: true };
+    case 'manual': return { sourceLimit: 1, runSourceDiscovery: true, dryRun: false };
+    case 'dry-run': return { sourceLimit: 1, runSourceDiscovery: true, dryRun: true };
+    case 'maintenance': return { sourceLimit: 1, runSourceDiscovery: false, dryRun: false };
+    case 'diagnostic': return { sourceLimit: 1, runSourceDiscovery: false, dryRun: true };
     default: return { sourceLimit: 1, runSourceDiscovery: false, dryRun: false };
   }
 }
