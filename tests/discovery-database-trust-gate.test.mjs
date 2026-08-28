@@ -43,3 +43,12 @@ test('database canonicalizes Greenhouse source aliases before unique URL enforce
   assert.match(sql, /job-boards\.greenhouse\.io/i);
   assert.match(sql, /new\.canonical_url/i);
 });
+
+test('database derives stable Workday and Manatal learned source names', () => {
+  assert.match(sql, /refine_discovery_provider_source_name/i);
+  assert.match(sql, /provider_name\s*=\s*'workday'/i);
+  assert.match(sql, /myworkdayjobs\.com/i);
+  assert.match(sql, /provider_name\s*=\s*'manatal'/i);
+  assert.match(sql, /careers-page\.com/i);
+  assert.match(sql, /new\.company\s*:=\s*refined_name/i);
+});
