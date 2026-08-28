@@ -89,8 +89,11 @@ test('failed source never ages or closes jobs', () => {
   assert.equal(result.missingUpdates.length, 0);
 });
 
-test('run planning keeps every Edge invocation resource-bounded', () => {
-  assert.deepEqual(planDiscoveryRun('scheduled'), { sourceLimit: 10, runSourceDiscovery: false, dryRun: false });
+test('scheduled discovery leases one source per Edge invocation', () => {
+  assert.deepEqual(planDiscoveryRun('scheduled'), { sourceLimit: 1, runSourceDiscovery: false, dryRun: false });
+});
+
+test('non-scheduled run planning remains bounded by action', () => {
   assert.deepEqual(planDiscoveryRun('manual'), { sourceLimit: 30, runSourceDiscovery: true, dryRun: false });
   assert.deepEqual(planDiscoveryRun('dry-run'), { sourceLimit: 20, runSourceDiscovery: true, dryRun: true });
   assert.deepEqual(planDiscoveryRun('diagnostic'), { sourceLimit: 10, runSourceDiscovery: false, dryRun: true });
