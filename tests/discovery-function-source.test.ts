@@ -2,7 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const source = readFileSync(new URL('../supabase/functions/discover-jobs/index.ts', import.meta.url), 'utf8');
+const entrypoint = readFileSync(new URL('../supabase/functions/discover-jobs/index.ts', import.meta.url), 'utf8');
+const orchestrator = readFileSync(new URL('../supabase/functions/discover-jobs/orchestrator.ts', import.meta.url), 'utf8');
+const source = `${entrypoint}\n${orchestrator}`;
+
+test('entrypoint stays small and delegates to the orchestrator', () => {
+  assert.match(entrypoint, /handleDiscoveryRequest/);
+  assert.ok(entrypoint.split('\n').length <= 8);
+});
 
 test('orchestrator retains scheduled secret and admin authorization', () => {
   assert.match(source, /read_job_discovery_cron_secret_for_service/);
@@ -11,8 +18,8 @@ test('orchestrator retains scheduled secret and admin authorization', () => {
 });
 
 test('dry-run reads due sources without leasing or mutating source registry', () => {
-  assert.match(source, /plan\.dryRun[\s\S]{0,1600}from\(['"]discovery_sources['"]\)[\s\S]{0,800}next_crawl_at/);
-  assert.match(source, /plan\.dryRun[\s\S]{0,2200}lease_discovery_sources/);
+  assert.match(source, /plan\.dryRun[\s\S]{0,1800}from\(['"]discovery_sources['"]\)[\s\S]{0,900}next_crawl_at/);
+  assert.match(source, /plan\.dryRun[\s\S]{0,2600}lease_discovery_sources/);
   assert.doesNotMatch(source, /const \{ data: leased[\s\S]{0,250}= await service\.rpc\(['"]lease_discovery_sources['"]/);
 });
 
