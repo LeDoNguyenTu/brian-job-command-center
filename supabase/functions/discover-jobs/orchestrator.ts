@@ -523,6 +523,13 @@ export async function handleDiscoveryRequest(request: Request): Promise<Response
   };
   const sourceResults: Array<Record<string, unknown>> = [];
   const markets = settings.discovery_markets?.length ? settings.discovery_markets : ['SG'];
+  const eligibilitySettings = {
+    enabledMarkets: markets,
+    maxRequiredYears: settings.discovery_max_required_years ?? 2,
+    verifiedLanguages: ['English', 'Vietnamese'],
+    targetRoleKeywords: settings.discovery_target_role_keywords ?? [],
+    excludedTitleKeywords: settings.discovery_excluded_title_keywords ?? [],
+  };
 
   for (const source of sources) {
     const adapterResult = await fetchSourceJobs(source);
@@ -568,11 +575,7 @@ export async function handleDiscoveryRequest(request: Request): Promise<Response
         requiredYears: requiredExperienceYears(item.descriptionText),
         mandatoryLanguages: mandatoryLanguages(item.descriptionText),
         sponsorshipRestriction: sponsorshipRestriction(item.descriptionText),
-      }, {
-        enabledMarkets: markets,
-        maxRequiredYears: settings.discovery_max_required_years ?? 2,
-        verifiedLanguages: ['English', 'Vietnamese'],
-      }).eligible);
+      }, eligibilitySettings).eligible);
 
       if (!plan.dryRun) {
         for (const item of eligibleInserts) {
@@ -585,11 +588,7 @@ export async function handleDiscoveryRequest(request: Request): Promise<Response
             requiredYears: requiredExperienceYears(item.descriptionText),
             mandatoryLanguages: mandatoryLanguages(item.descriptionText),
             sponsorshipRestriction: restriction,
-          }, {
-            enabledMarkets: markets,
-            maxRequiredYears: settings.discovery_max_required_years ?? 2,
-            verifiedLanguages: ['English', 'Vietnamese'],
-          });
+          }, eligibilitySettings);
           const { data: insertedRows, error } = await service.from('jobs').insert({
             company: item.company,
             position: item.title,
