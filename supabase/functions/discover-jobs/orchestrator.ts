@@ -239,7 +239,7 @@ async function discoverSources(service: ReturnType<typeof createClient>, setting
   const baseQueries = settings.discovery_search_queries?.filter(Boolean).slice(0, 2) ?? [];
   const generalQueries = markets.map((market) => `graduate junior software cybersecurity IT support cloud jobs ${MARKET_NAME[market]} company careers`);
   const marketNames = markets.map((market) => MARKET_NAME[market]).join(' OR ');
-  const infrastructureQuery = `(site:myworkdayjobs.com OR site:greenhouse.io OR site:lever.co OR site:ashbyhq.com OR site:smartrecruiters.com OR site:successfactors.com OR site:taleo.net OR site:oraclecloud.com OR site:icims.com OR site:pageuppeople.com OR site:workable.com OR site:recruitee.com OR site:teamtailor.com OR site:jobvite.com) (${marketNames}) software security IT`;
+  const infrastructureQuery = `(site:myworkdayjobs.com OR site:greenhouse.io OR site:lever.co OR site:ashbyhq.com OR site:smartrecruiters.com OR site:successfactors.com OR site:taleo.net OR site:oraclecloud.com OR site:icims.com OR site:pageuppeople.com OR site:workable.com OR site:recruitee.com OR site:teamtailor.com OR site:jobvite.com OR site:avature.net OR site:bamboohr.com OR site:careers-page.com OR site:personio.com OR site:phenompeople.com OR site:eightfold.ai) (${marketNames}) software security IT`;
   const queries = [...new Set([...generalQueries, ...baseQueries, infrastructureQuery])].slice(0, 10);
   let learned = 0, quarantined = 0;
   const attempts: Array<Record<string, unknown>> = [];
@@ -248,6 +248,7 @@ async function discoverSources(service: ReturnType<typeof createClient>, setting
   for (const provider of configured) {
     const key = providerKeys[provider]!;
     let providerHits = 0;
+    let providerLearned = 0;
     try {
       for (const query of queries) {
         const hits = await searchProvider(provider, query, key);
@@ -273,6 +274,7 @@ async function discoverSources(service: ReturnType<typeof createClient>, setting
             if (knownCanonical.has(canonical)) continue;
             if (dryRun) {
               learned += 1;
+              providerLearned += 1;
               knownCanonical.add(canonical);
               continue;
             }
@@ -293,6 +295,7 @@ async function discoverSources(service: ReturnType<typeof createClient>, setting
             });
             if (!error) {
               learned += 1;
+              providerLearned += 1;
               knownCanonical.add(canonical);
               if (proposal.source.employerHost) knownEmployerHosts.push(proposal.source.employerHost);
             }
@@ -310,8 +313,8 @@ async function discoverSources(service: ReturnType<typeof createClient>, setting
         }
         if (providerHits >= 40) break;
       }
-      attempts.push({ provider, status: 'used', reason: providerHits ? 'Source discovery completed' : 'No results', results: providerHits, checkedAt: new Date().toISOString() });
-      if (providerHits > 0) break;
+      attempts.push({ provider, status: 'used', reason: providerLearned ? `Learned ${providerLearned} trusted source${providerLearned === 1 ? '' : 's'}` : providerHits ? 'Results contained no new trusted sources' : 'No results', results: providerHits, checkedAt: new Date().toISOString() });
+      if (providerLearned > 0) break;
     } catch (error) {
       attempts.push({ provider, status: 'failed', reason: error instanceof Error ? error.message.slice(0, 300) : 'Provider failed', results: 0, checkedAt: new Date().toISOString() });
     }
