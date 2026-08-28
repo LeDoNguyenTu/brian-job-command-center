@@ -93,4 +93,5 @@ test('run planning is bounded by action', () => {
   assert.deepEqual(planDiscoveryRun('scheduled'), { sourceLimit: 10, runSourceDiscovery: false, dryRun: false });
   assert.deepEqual(planDiscoveryRun('manual'), { sourceLimit: 30, runSourceDiscovery: true, dryRun: false });
   assert.deepEqual(planDiscoveryRun('dry-run'), { sourceLimit: 20, runSourceDiscovery: true, dryRun: true });
+  assert.deepEqual(planDiscoveryRun('diagnostic'), { sourceLimit: 30, runSourceDiscovery: false, dryRun: true });
 });
