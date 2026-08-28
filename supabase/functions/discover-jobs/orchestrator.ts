@@ -77,7 +77,8 @@ const requiredExperienceYears = (text: string) => {
     const requiredIndex = Array.from(before.matchAll(requiredCue)).at(-1)?.index ?? -1;
     const preferredIndex = Array.from(before.matchAll(preferredCue)).at(-1)?.index ?? -1;
     if (preferredIndex > requiredIndex) continue;
-    if (/^[^.;]{0,36}\b(?:preferred|nice to have|bonus|advantage|optional|a plus)\b/i.test(after)) continue;
+    if (/^[^.;]{0,36}\bpreferred\b(?!\s+experience\b)/i.test(after)
+      || /^[^.;]{0,36}\b(?:nice to have|bonus|advantage|optional|a plus)\b/i.test(after)) continue;
 
     const hasRequiredContext = requiredIndex >= 0;
     const hasExperienceSuffix = /^\s*(?:of\s+)?(?:professional|commercial|industry|relevant|work|hands-on\s+)?experience\b/i.test(after);
