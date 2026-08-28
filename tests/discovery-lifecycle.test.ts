@@ -29,6 +29,45 @@ test('duplicate refresh resets missing count and refreshes availability evidence
   assert.equal(result.refreshes[0].availabilityEvidence, 'fresh live feed');
 });
 
+test('refresh with unknown posted date preserves an existing known date', () => {
+  const result = reconcileSourceSnapshot({
+    now: '2026-08-28T00:00:00.000Z', sourceFetchSucceeded: true, fetchedJobs: [job({ postedAt: null })],
+    existingJobs: [{ id: 7, sourceId: 's1', providerJobId: 'j1', canonicalUrl: 'https://jobs.example.com/j1', pipeline: 'Discovered', missingFromSourceCount: 0, firstSeenAt: '2026-08-20T00:00:00.000Z', postedAt: '2026-08-25T00:00:00.000Z' }],
+  });
+  assert.equal(result.refreshes[0].postedAt, '2026-08-25T00:00:00.000Z');
+});
+
+test('canonical URL fallback upgrades an earlier URL-only record instead of duplicating it', () => {
+  const result = reconcileSourceSnapshot({
+    now: '2026-08-28T00:00:00.000Z', sourceFetchSucceeded: true,
+    fetchedJobs: [job({ providerJobId: 'learned-id', canonicalUrl: 'https://jobs.example.com/j1' })],
+    existingJobs: [{ id: 7, sourceId: 's1', providerJobId: null, canonicalUrl: 'https://jobs.example.com/j1', pipeline: 'Discovered', missingFromSourceCount: 0, firstSeenAt: '2026-08-20T00:00:00.000Z' }],
+  });
+  assert.equal(result.inserts.length, 0);
+  assert.equal(result.refreshes.length, 1);
+  assert.equal(result.refreshes[0].providerJobId, 'learned-id');
+});
+
+test('explicit closed evidence closes an untouched discovered job immediately', () => {
+  const result = reconcileSourceSnapshot({
+    now: '2026-08-28T00:00:00.000Z', sourceFetchSucceeded: true,
+    fetchedJobs: [job({ availabilityStatus: 'closed', availabilityEvidence: 'Official page says position filled' })],
+    existingJobs: [{ id: 1, sourceId: 's1', providerJobId: 'j1', canonicalUrl: 'https://jobs.example.com/j1', pipeline: 'Discovered', missingFromSourceCount: 0, firstSeenAt: '2026-08-20T00:00:00.000Z' }],
+  });
+  assert.deepEqual(result.closes, [{ id: 1, availabilityStatus: 'closed', availabilityEvidence: 'Official page says position filled' }]);
+  assert.equal(result.missingUpdates.length, 0);
+});
+
+test('explicit closed evidence does not close a manually managed applied job', () => {
+  const result = reconcileSourceSnapshot({
+    now: '2026-08-28T00:00:00.000Z', sourceFetchSucceeded: true,
+    fetchedJobs: [job({ availabilityStatus: 'closed', availabilityEvidence: 'Official page says position filled' })],
+    existingJobs: [{ id: 2, sourceId: 's1', providerJobId: 'j1', canonicalUrl: 'https://jobs.example.com/j1', pipeline: 'Applied', missingFromSourceCount: 0, firstSeenAt: '2026-08-20T00:00:00.000Z' }],
+  });
+  assert.equal(result.closes.length, 0);
+  assert.equal(result.missingUpdates.length, 0);
+});
+
 test('two successful omissions close only untouched Discovered jobs', () => {
   const result = reconcileSourceSnapshot({
     now: '2026-08-28T00:00:00.000Z', sourceFetchSucceeded: true, fetchedJobs: [],
