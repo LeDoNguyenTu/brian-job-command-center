@@ -29,6 +29,8 @@ type RefreshOperation = {
   availabilityEvidence: string;
   postedAt: string | null;
   missingFromSourceCount: 0;
+  existingPipeline: string;
+  currentJob: NormalizedJob;
 };
 type MissingOperation = { id: number; missingFromSourceCount: number };
 type CloseOperation = { id: number; availabilityStatus: 'closed'; availabilityEvidence: string };
@@ -86,6 +88,8 @@ export function reconcileSourceSnapshot(input: SnapshotInput) {
       availabilityEvidence: job.availabilityEvidence,
       postedAt: job.postedAt ?? found.postedAt ?? null,
       missingFromSourceCount: 0,
+      existingPipeline: found.pipeline,
+      currentJob: job,
     });
   }
 
