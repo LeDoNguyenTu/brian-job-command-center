@@ -31,8 +31,8 @@ test('Greenhouse adapter emits verified normalized jobs', async () => {
   assert.equal(result.jobs[0].descriptionText, 'Build APIs');
 });
 
-test('structured ATS JSON accepts a bounded feed above the HTML response cap', async () => {
-  const largeDescription = 'A'.repeat(2_100_000);
+test('structured ATS JSON accepts a bounded enterprise feed above the HTML response cap', async () => {
+  const largeDescription = 'A'.repeat(7_000_000);
   const fetcher = async () => jsonResponse({ jobs: [{ id: 77, title: 'Software Engineer', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/77', content: largeDescription, location: { name: 'Singapore' } }] });
   const result = await fetchSourceJobs(source('greenhouse', 'https://job-boards.greenhouse.io/acme'), fetcher as typeof fetch);
   assert.equal(result.status, 'success');
