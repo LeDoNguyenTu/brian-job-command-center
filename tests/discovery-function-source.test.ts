@@ -23,6 +23,13 @@ test('dry-run reads due sources without leasing or mutating source registry', ()
   assert.doesNotMatch(source, /const \{ data: leased[\s\S]{0,250}= await service\.rpc\(['"]lease_discovery_sources['"]/);
 });
 
+test('dry-run source discovery never persists quarantine candidates', () => {
+  const start = source.indexOf('async function discoverSources');
+  const end = source.indexOf('async function authorize', start);
+  const block = source.slice(start, end);
+  assert.match(block, /if \(!dryRun\) \{[\s\S]{0,250}from\(['"]discovery_quarantine['"]\)\.insert/);
+});
+
 test('source discovery never turns raw web search hits directly into jobs', () => {
   const start = source.indexOf('async function discoverSources');
   const end = source.indexOf('async function authorize', start);
@@ -37,6 +44,13 @@ test('source provider failover continues until a trusted source is learned', () 
   assert.match(source, /let providerLearned = 0/);
   assert.match(source, /if \(providerLearned > 0\) break/);
   assert.doesNotMatch(source, /if \(providerHits > 0\) break/);
+});
+
+test('diagnostic metrics include bounded per-source evidence', () => {
+  assert.match(source, /const sourceResults: Array<Record<string, unknown>> = \[\]/);
+  assert.match(source, /sourceResults\.push\(\{[\s\S]{0,500}sourceId: source\.id[\s\S]{0,500}status: adapterResult\.status/);
+  assert.match(source, /error: adapterResult\.error\?\.slice\(0, 300\) \?\? null/);
+  assert.match(source, /metrics: \{ dryRun: plan\.dryRun, providerAttempts: discovery\.attempts, sourceResults \}/);
 });
 
 test('unknown employer sources require structured ownership evidence rather than self-verification', () => {
