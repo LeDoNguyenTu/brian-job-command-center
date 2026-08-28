@@ -33,7 +33,7 @@ export type SourceProposal = {
   sourceClass: SourceClass;
 };
 
-const ROLE_LIKE_TITLE = /\b(?:engineer|developer|analyst|architect|intern|graduate|junior|senior|manager|specialist|consultant|support|devops|sre|software|cyber|security|cloud|data|programmer|technician)\b/i;
+const ROLE_LIKE_TITLE = /\b(?:engineer|developer|analyst|architect|intern|graduate|junior|senior|manager|specialist|consultant|support|devops|sre|programmer|technician)\b/i;
 
 const humanizeSlug = (slug: string) => slug
   .replace(/[-_]+/g, ' ')
