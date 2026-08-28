@@ -13,13 +13,22 @@ test("trusts recognized ATS infrastructure", () => {
   }
 });
 
-test("trusts a verified employer career host even when ATS is unknown", () => {
+test("trusts a verified employer career subdomain even when ATS is unknown", () => {
   const result = assessSourceTrust({
     url: "https://careers.example.com/openings",
     verifiedEmployerHosts: ["example.com"],
   });
   assert.equal(result.trusted, true);
   assert.equal(result.level, "official");
+});
+
+test("does not accept an unknown host merely because it claims itself as the employer", () => {
+  const result = assessSourceTrust({
+    url: "https://fake-employer.example/jobs",
+    verifiedEmployerHosts: ["fake-employer.example"],
+  });
+  assert.equal(result.trusted, false);
+  assert.equal(result.level, "untrusted");
 });
 
 test("rejects free-hosting, shortener and aggregator sources", () => {
