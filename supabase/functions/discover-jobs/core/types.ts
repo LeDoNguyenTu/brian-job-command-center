@@ -56,6 +56,8 @@ export type DiscoverySourceRecord = {
   marketCodes: MarketCode[];
   trustLevel: SourceTrustLevel;
   adapterConfig: Record<string, unknown>;
+  crawlIntervalMinutes?: number;
+  consecutiveFailures?: number;
 };
 
 export type NormalizedJob = {
