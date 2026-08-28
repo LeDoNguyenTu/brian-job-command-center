@@ -16,3 +16,23 @@ test('database rejects self-claimed unknown employer sources learned from web se
   assert.match(sql, /employer_host\s*=\s*source_host/i);
   assert.match(sql, /source_host\s+not\s+like\s+'%\.'\s*\|\|\s*employer_host/i);
 });
+
+test('database rejects web-learned board search pages that are not individual vacancies', () => {
+  assert.match(sql, /enforce_web_discovery_source_quality/i);
+  assert.match(sql, /source_class\s*=\s*'verified_board'/i);
+  assert.match(sql, /individual vacancy listing/i);
+  assert.match(sql, /linkedin\.com/i);
+  assert.match(sql, /indeed\.com/i);
+});
+
+test('database normalizes role-like learned ATS source names from the stable source slug', () => {
+  assert.match(sql, /role_like_title/i);
+  assert.match(sql, /source_slug/i);
+  assert.match(sql, /new\.company\s*:=\s*source_slug/i);
+  assert.match(sql, /new\.display_name\s*:=\s*source_slug/i);
+});
+
+test('database refines source-name detection without treating industry words as job titles', () => {
+  assert.match(sql, /refine_web_discovery_source_names/i);
+  assert.match(sql, /engineer\|developer\|analyst/i);
+});

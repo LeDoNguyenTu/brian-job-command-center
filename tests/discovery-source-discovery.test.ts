@@ -39,7 +39,7 @@ test('untrusted mirror is quarantined', () => {
   assert.match(proposal.reason, /free-hosting|ownership|untrusted/i);
 });
 
-test('known public job board is a verified-board proposal, not an official source', () => {
+test('known public job board individual vacancy is a verified-board proposal', () => {
   const proposal = proposeDiscoverySource({
     url: 'https://sg.indeed.com/viewjob?jk=ABC123',
     title: 'Software Engineer - Example',
@@ -48,4 +48,53 @@ test('known public job board is a verified-board proposal, not an official sourc
   assert.equal(proposal.kind, 'source');
   assert.equal(proposal.source.sourceClass, 'verified_board');
   assert.equal(proposal.source.trustLevel, 'verified_board');
+});
+
+test('job board search and category pages are quarantined instead of becoming source inventory', () => {
+  for (const url of [
+    'https://sg.linkedin.com/jobs',
+    'https://www.linkedin.com/jobs/search/?keywords=software%20engineer',
+    'https://sg.indeed.com/Cloud-Graduate-jobs',
+    'https://www.indeed.com/q-junior-full-stack-javascript-developer-jobs.html',
+  ]) {
+    const proposal = proposeDiscoverySource({
+      url,
+      title: '1000+ Junior Software Engineer Jobs',
+      snippet: 'Search results',
+    });
+    assert.equal(proposal.kind, 'quarantine', url);
+    assert.match(proposal.reason, /individual|vacancy|listing/i, url);
+  }
+});
+
+test('linkedin individual job URLs remain eligible verified-board sources', () => {
+  const proposal = proposeDiscoverySource({
+    url: 'https://www.linkedin.com/jobs/view/software-engineer-at-example-1234567890',
+    title: 'Software Engineer - Example',
+    snippet: 'Singapore',
+  });
+  assert.equal(proposal.kind, 'source');
+  assert.equal(proposal.source.sourceClass, 'verified_board');
+});
+
+test('learned ATS sources derive employer name from the stable source slug, not the job headline', () => {
+  const proposal = proposeDiscoverySource({
+    url: 'https://job-boards.greenhouse.io/guardsquare',
+    title: 'Java Software Engineer (Singapore)',
+    snippet: 'Singapore opening',
+  });
+  assert.equal(proposal.kind, 'source');
+  assert.equal(proposal.source.company, 'Guardsquare');
+  assert.equal(proposal.source.displayName, 'Guardsquare');
+});
+
+test('company names containing broad industry words are not mistaken for job titles', () => {
+  const proposal = proposeDiscoverySource({
+    url: 'https://job-boards.greenhouse.io/abnormalsecurity',
+    title: 'Abnormal Security',
+    snippet: 'Careers at Abnormal Security',
+  });
+  assert.equal(proposal.kind, 'source');
+  assert.equal(proposal.source.company, 'Abnormal Security');
+  assert.equal(proposal.source.displayName, 'Abnormal Security');
 });

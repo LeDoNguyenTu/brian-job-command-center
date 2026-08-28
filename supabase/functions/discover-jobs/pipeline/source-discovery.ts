@@ -33,12 +33,69 @@ export type SourceProposal = {
   sourceClass: SourceClass;
 };
 
+const ROLE_LIKE_TITLE = /\b(?:engineer|developer|analyst|architect|intern|graduate|junior|senior|manager|specialist|consultant|support|devops|sre|programmer|technician)\b/i;
+
+const humanizeSlug = (slug: string) => slug
+  .replace(/[-_]+/g, ' ')
+  .replace(/\b\w/g, (character) => character.toUpperCase());
+
 const companyFromTitleOrHost = (title: string | undefined, hostname: string) => {
   const titleCompany = title?.split(/\s[-|:]\s| careers?\b| jobs?\b/i)[0]?.trim();
   if (titleCompany && titleCompany.length >= 2 && titleCompany.length <= 120) return titleCompany;
   const first = hostname.replace(/^www\.|^careers\.|^jobs\./, '').split('.')[0];
-  return first ? first.replace(/[-_]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()) : 'Unknown employer';
+  return first ? humanizeSlug(first) : 'Unknown employer';
 };
+
+const sourceSlug = (url: URL, provider: string) => {
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable', 'recruitee', 'teamtailor'].includes(provider)) {
+    return parts[0] ?? null;
+  }
+  if (provider === 'workday') {
+    return url.hostname.split('.')[0] || null;
+  }
+  return null;
+};
+
+const companyForRecruitmentSource = (title: string | undefined, url: URL, provider: string) => {
+  const slug = sourceSlug(url, provider);
+  if (slug && (!title || ROLE_LIKE_TITLE.test(title))) return humanizeSlug(slug);
+  return companyFromTitleOrHost(title, url.hostname);
+};
+
+const hostMatches = (hostname: string, root: string) => hostname === root || hostname.endsWith(`.${root}`);
+
+function isIndividualBoardListing(url: URL) {
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+  const path = url.pathname;
+
+  if (hostMatches(hostname, 'indeed.com')) {
+    return Boolean(url.searchParams.get('jk')) || /\/viewjob(?:\/|$)/i.test(path);
+  }
+  if (hostMatches(hostname, 'linkedin.com')) {
+    return /\/jobs\/view\/(?:[^/]+-)?\d+(?:\/|$)/i.test(path);
+  }
+  if (hostMatches(hostname, 'jobstreet.com') || hostMatches(hostname, 'jobstreet.com.sg') || hostMatches(hostname, 'seek.com.au')) {
+    return /\/job\/\d+(?:\/|$)/i.test(path);
+  }
+  if (hostMatches(hostname, 'mycareersfuture.gov.sg')) {
+    return /\/job\//i.test(path) && /[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i.test(path);
+  }
+  if (hostMatches(hostname, 'glints.com')) {
+    return /\/opportunities\/jobs\//i.test(path);
+  }
+  if (hostMatches(hostname, 'itviec.com')) {
+    return /\/it-jobs\//i.test(path);
+  }
+  if (hostMatches(hostname, 'topcv.vn')) {
+    return /\/viec-lam\//i.test(path) && /\d+(?:\.html)?\/?$/i.test(path);
+  }
+  if (hostMatches(hostname, 'vietnamworks.com')) {
+    return /(?:-|\/)jv(?:-|\/|$)|\/job\//i.test(path);
+  }
+
+  return false;
+}
 
 export function proposeDiscoverySource(input: SearchSourceCandidate): SourceProposal {
   let url: URL;
@@ -53,6 +110,15 @@ export function proposeDiscoverySource(input: SearchSourceCandidate): SourceProp
   });
 
   if (fingerprint.sourceClass === 'verified_board' && fingerprint.adapter === 'verified_board') {
+    if (!isIndividualBoardListing(url)) {
+      return {
+        kind: 'quarantine',
+        url: input.url,
+        reason: 'Verified job board URL is not an individual vacancy listing',
+        provider: fingerprint.provider,
+        sourceClass: 'verified_board',
+      };
+    }
     const company = companyFromTitleOrHost(input.title, url.hostname);
     return {
       kind: 'source',
@@ -83,7 +149,7 @@ export function proposeDiscoverySource(input: SearchSourceCandidate): SourceProp
     };
   }
 
-  const company = companyFromTitleOrHost(input.title, url.hostname);
+  const company = companyForRecruitmentSource(input.title, url, fingerprint.provider);
   return {
     kind: 'source',
     source: {
