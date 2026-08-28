@@ -11,6 +11,12 @@ const loadMigration = () => {
   return readFileSync(join(migrationsDir.pathname, names[0]), "utf8");
 };
 
+const loadRuntimeBoundMigration = () => {
+  const names = readdirSync(migrationsDir).filter((name) => name.endsWith("_bound_discovery_runtime.sql"));
+  assert.equal(names.length, 1, "expected exactly one discovery runtime-bound migration");
+  return readFileSync(join(migrationsDir.pathname, names[0]), "utf8");
+};
+
 test("creates registry, run and quarantine tables with RLS", () => {
   const sql = loadMigration();
   for (const table of ["discovery_sources", "discovery_runs", "discovery_quarantine"]) {
@@ -36,8 +42,16 @@ test("adds bounded service-only source leasing", () => {
   assert.match(sql, /grant execute on function public\.lease_discovery_sources\(integer, integer\) to service_role/i);
 });
 
-test("reconciles one per-minute Vault-backed cron runner", () => {
+test("reconciles one Vault-backed cron runner", () => {
   const sql = loadMigration();
+  assert.match(sql, /brian-job-discovery-runner/i);
+  assert.match(sql, /vault\.decrypted_secrets/i);
+  assert.match(sql, /job_discovery_cron_secret/i);
+  assert.match(sql, /x-cron-secret/i);
+});
+
+test("reschedules the bounded source runner to every minute", () => {
+  const sql = loadRuntimeBoundMigration();
   assert.match(sql, /brian-job-discovery-runner/i);
   assert.match(sql, /'\* \* \* \* \*'/);
   assert.match(sql, /vault\.decrypted_secrets/i);
