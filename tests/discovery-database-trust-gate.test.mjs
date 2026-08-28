@@ -31,3 +31,8 @@ test('database normalizes role-like learned ATS source names from the stable sou
   assert.match(sql, /new\.company\s*:=\s*source_slug/i);
   assert.match(sql, /new\.display_name\s*:=\s*source_slug/i);
 });
+
+test('database refines source-name detection without treating industry words as job titles', () => {
+  assert.match(sql, /refine_web_discovery_source_names/i);
+  assert.match(sql, /engineer\|developer\|analyst/i);
+});
