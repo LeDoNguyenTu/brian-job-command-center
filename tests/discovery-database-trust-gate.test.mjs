@@ -36,3 +36,10 @@ test('database refines source-name detection without treating industry words as 
   assert.match(sql, /refine_web_discovery_source_names/i);
   assert.match(sql, /engineer\|developer\|analyst/i);
 });
+
+test('database canonicalizes Greenhouse source aliases before unique URL enforcement', () => {
+  assert.match(sql, /normalize_discovery_source_canonical_url/i);
+  assert.match(sql, /boards\.greenhouse\.io/i);
+  assert.match(sql, /job-boards\.greenhouse\.io/i);
+  assert.match(sql, /new\.canonical_url/i);
+});
