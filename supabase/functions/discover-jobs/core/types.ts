@@ -7,6 +7,7 @@ export type SourceAdapter =
   | 'ashby'
   | 'smartrecruiters'
   | 'workday'
+  | 'manatal'
   | 'jsonld'
   | 'embedded_json'
   | 'generic_employer_html'
