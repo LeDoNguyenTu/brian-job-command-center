@@ -4,7 +4,7 @@ import type { DiscoverySourceRecord, MarketCode, NormalizedJob } from '../core/t
 import type { FetchLike } from './types.ts';
 
 const MAX_HTML_RESPONSE_BYTES = 2_000_000;
-const MAX_JSON_RESPONSE_BYTES = 5_000_000;
+const MAX_JSON_RESPONSE_BYTES = 10_000_000;
 
 export const stripHtml = (value = '') => value
   .replace(/<style[\s\S]*?<\/style>/gi, ' ')
