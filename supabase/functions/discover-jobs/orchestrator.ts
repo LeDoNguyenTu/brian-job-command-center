@@ -68,19 +68,14 @@ const requiredExperienceYears = (text: string) => {
   const requiredCue = /\b(?:requirements?|required skills?|must(?:\s+have)?|minimum(?: of)?|at least|requires?|required)\b/gi;
   const preferredCue = /\b(?:preferred|nice to have|bonus|advantage|optional|plus but not required)\b/gi;
   const candidate = /\b(\d+)\s*(?:\+|-\s*\d+|to\s+\d+)?\s*(?:years?|yrs?|yoe)\b/gi;
-  const lastCueIndex = (value: string, pattern: RegExp) => {
-    let index = -1;
-    for (const match of value.matchAll(pattern)) index = match.index ?? index;
-    return index;
-  };
 
   let required = 0;
   for (const match of normalized.matchAll(candidate)) {
     const start = match.index ?? 0;
     const before = normalized.slice(Math.max(0, start - 180), start);
     const after = normalized.slice(start + match[0].length, start + match[0].length + 48);
-    const requiredIndex = lastCueIndex(before, requiredCue);
-    const preferredIndex = lastCueIndex(before, preferredCue);
+    const requiredIndex = Array.from(before.matchAll(requiredCue)).at(-1)?.index ?? -1;
+    const preferredIndex = Array.from(before.matchAll(preferredCue)).at(-1)?.index ?? -1;
     if (preferredIndex > requiredIndex) continue;
     if (/^[^.;]{0,36}\b(?:preferred|nice to have|bonus|advantage|optional|a plus)\b/i.test(after)) continue;
 
