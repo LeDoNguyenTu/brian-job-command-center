@@ -13,6 +13,16 @@ test("recognizes major ATS families without treating them as an allowlist", () =
     ["https://careers.acme.com/", "oracle", '<script src="/hcmUI/CandidateExperience"></script>'],
     ["https://jobs.acme.com/", "icims", '<script src="https://cdn.icims.com/a.js"></script>'],
     ["https://careers.acme.com/", "pageup", '<a href="https://secure.dc2.pageuppeople.com/apply">Apply</a>'],
+    ["https://apply.workable.com/acme/", "workable"],
+    ["https://acme.recruitee.com/", "recruitee"],
+    ["https://careers.acme.teamtailor.com/", "teamtailor"],
+    ["https://jobs.jobvite.com/acme/", "jobvite"],
+    ["https://acme.avature.net/careers", "avature"],
+    ["https://acme.bamboohr.com/careers", "bamboohr"],
+    ["https://neutron.careers-page.com/jobs/abc", "manatal"],
+    ["https://jobs.acme.icims.com/jobs/search", "icims"],
+    ["https://acme.taleo.net/careersection", "oracle"],
+    ["https://acme.fa.ap1.oraclecloud.com/hcmUI/CandidateExperience", "oracle"],
   ] as const;
 
   for (const [url, provider, html = ""] of fixtures) {
