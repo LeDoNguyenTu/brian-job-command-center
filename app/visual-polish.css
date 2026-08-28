@@ -1,0 +1,101 @@
+:root{
+  --scroll-track:rgba(255,255,255,.025);
+  --scroll-thumb:rgba(155,124,255,.34);
+  --scroll-thumb-hover:rgba(189,170,255,.58);
+}
+
+body:has(.app-shell.light){
+  --scroll-track:rgba(31,34,49,.045);
+  --scroll-thumb:rgba(104,72,207,.32);
+  --scroll-thumb-hover:rgba(94,62,194,.55);
+  --ink:#1b1d29;
+  --muted:#606678;
+  --faint:#686f82;
+  --panel:rgba(255,255,255,.9);
+  --panel-solid:#fff;
+  --panel-soft:rgba(31,34,49,.055);
+  --border:rgba(34,37,53,.16);
+  --border-strong:rgba(34,37,53,.28);
+  --page:#f3f4f9;
+  --purple:#6848cf;
+  --purple-bright:#5e3ec2;
+  --cyan:#006f7f;
+  --green:#167548;
+  --amber:#965100;
+  --danger:#be2b40;
+}
+
+html,body{max-width:100%;overflow-x:hidden}
+
+*,*::before,*::after{
+  scrollbar-width:thin;
+  scrollbar-color:var(--scroll-thumb) var(--scroll-track);
+}
+
+*::-webkit-scrollbar{width:8px;height:8px}
+*::-webkit-scrollbar-track{background:var(--scroll-track);border-radius:999px}
+*::-webkit-scrollbar-thumb{
+  min-height:34px;
+  border:2px solid transparent;
+  border-radius:999px;
+  background:var(--scroll-thumb);
+  background-clip:padding-box;
+}
+@media(hover:hover){*::-webkit-scrollbar-thumb:hover{background:var(--scroll-thumb-hover);background-clip:padding-box}}
+
+.job-modal,.security-modal,.editor-modal{
+  scrollbar-gutter:stable;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+}
+
+.filter-tabs{
+  max-width:100%;
+  min-width:0;
+  overscroll-behavior-inline:contain;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+}
+.filter-tabs::-webkit-scrollbar{display:none}
+
+.topbar>*,.top-actions,.search-box,.filter-row>*,.pipeline-tools,.job-card>*,.job-main,.security-heading>*,.settings-function-list-intro>*{min-width:0}
+.job-meta,.job-main,.security-copy,.connection-detail,.editor-note,.document-guidance{overflow-wrap:anywhere}
+
+@media(max-width:760px){
+  .modal-backdrop{
+    padding-top:10px;
+    padding-right:max(10px,env(safe-area-inset-right));
+    padding-bottom:max(10px,env(safe-area-inset-bottom));
+    padding-left:max(10px,env(safe-area-inset-left));
+  }
+  .job-modal,.security-modal,.editor-modal{
+    max-height:calc(100dvh - max(20px,env(safe-area-inset-bottom)));
+  }
+  .topbar{padding-right:max(18px,env(safe-area-inset-right));padding-left:max(18px,env(safe-area-inset-left))}
+  .content{padding-right:max(18px,env(safe-area-inset-right));padding-left:max(18px,env(safe-area-inset-left))}
+}
+
+@media(max-width:520px){
+  .topbar{padding-right:max(12px,env(safe-area-inset-right));padding-left:max(12px,env(safe-area-inset-left))}
+  .content{padding-right:max(14px,env(safe-area-inset-right));padding-left:max(14px,env(safe-area-inset-left))}
+  .search-box{min-width:0}
+  .top-actions{flex:0 0 auto}
+  .modal-backdrop{padding-right:max(6px,env(safe-area-inset-right));padding-left:max(6px,env(safe-area-inset-left))}
+  .job-modal,.security-modal,.editor-modal{padding:22px 18px 20px}
+  .document-actions,.modal-actions,.discovery-schedule-grid,.session-timeout-form{grid-template-columns:1fr}
+  .security-footer,.security-heading{align-items:flex-start;flex-direction:column}
+  .connection-form,.credential-form,.credential-form.password-grid{grid-template-columns:1fr}
+  .credential-form.password-grid .primary-button{grid-column:auto}
+}
+
+@media(max-width:380px){
+  .job-card{grid-template-columns:36px minmax(0,1fr);gap:10px}
+  .company-mark{width:36px;height:36px}
+  .job-main{padding-right:32px}
+  .score-ring{right:12px}
+}
+
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
