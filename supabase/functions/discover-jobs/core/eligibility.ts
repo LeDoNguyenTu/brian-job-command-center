@@ -26,9 +26,16 @@ export type EligibilityDecision = {
   risks: string[];
 };
 
+type CompiledTitleKeyword = {
+  original: string;
+  phrase: string;
+  tokens: string[];
+};
+
 const SENIOR_TITLE = /\b(senior|sr\.?|staff|principal|lead|manager|director|head|vice president|vp|architect)\b/i;
 const EXCLUDED_EMPLOYMENT = /\b(intern(ship)?|part[- ]?time|temporary|temp|casual|volunteer)\b/i;
 const ACCEPTED_EMPLOYMENT = /\b(full[- ]?time|contract|permanent)\b/i;
+const keywordCache = new WeakMap<readonly string[], CompiledTitleKeyword[]>();
 
 const normalizeLanguage = (value: string) => value.trim().toLowerCase();
 const normalizeTitleText = (value: string) => value
@@ -37,14 +44,21 @@ const normalizeTitleText = (value: string) => value
   .replace(/\s+/g, " ")
   .trim();
 
-const matchesConfiguredTitleKeyword = (title: string, keyword: string) => {
-  const normalizedTitle = normalizeTitleText(title);
-  const normalizedKeyword = normalizeTitleText(keyword);
-  if (!normalizedKeyword) return false;
-  if (` ${normalizedTitle} `.includes(` ${normalizedKeyword} `)) return true;
-  const titleTokens = new Set(normalizedTitle.split(" ").filter(Boolean));
-  const keywordTokens = normalizedKeyword.split(" ").filter(Boolean);
-  return keywordTokens.length > 1 && keywordTokens.every((token) => titleTokens.has(token));
+const compileKeywords = (keywords: readonly string[] | undefined) => {
+  if (!keywords?.length) return [];
+  const cached = keywordCache.get(keywords);
+  if (cached) return cached;
+  const compiled = keywords.flatMap((original) => {
+    const phrase = normalizeTitleText(original);
+    return phrase ? [{ original, phrase, tokens: phrase.split(" ").filter(Boolean) }] : [];
+  });
+  keywordCache.set(keywords, compiled);
+  return compiled;
+};
+
+const matchesCompiledKeyword = (normalizedTitle: string, titleTokens: Set<string>, keyword: CompiledTitleKeyword) => {
+  if (` ${normalizedTitle} `.includes(` ${keyword.phrase} `)) return true;
+  return keyword.tokens.length > 1 && keyword.tokens.every((token) => titleTokens.has(token));
 };
 
 export function assessEligibility(job: EligibilityJob, settings: EligibilitySettings): EligibilityDecision {
@@ -55,14 +69,16 @@ export function assessEligibility(job: EligibilityJob, settings: EligibilitySett
     reasons.push("Outside enabled APAC markets");
   }
 
-  const targetRoleKeywords = (settings.targetRoleKeywords ?? []).filter((keyword) => keyword.trim());
-  if (targetRoleKeywords.length && !targetRoleKeywords.some((keyword) => matchesConfiguredTitleKeyword(job.title, keyword))) {
+  const normalizedTitle = normalizeTitleText(job.title);
+  const titleTokens = new Set(normalizedTitle.split(" ").filter(Boolean));
+  const targetRoleKeywords = compileKeywords(settings.targetRoleKeywords);
+  if (targetRoleKeywords.length && !targetRoleKeywords.some((keyword) => matchesCompiledKeyword(normalizedTitle, titleTokens, keyword))) {
     reasons.push("Title does not match a configured target role");
   }
 
-  const matchedExcludedKeyword = (settings.excludedTitleKeywords ?? [])
-    .find((keyword) => keyword.trim() && matchesConfiguredTitleKeyword(job.title, keyword));
-  if (matchedExcludedKeyword) reasons.push(`Excluded title keyword: ${matchedExcludedKeyword}`);
+  const matchedExcludedKeyword = compileKeywords(settings.excludedTitleKeywords)
+    .find((keyword) => matchesCompiledKeyword(normalizedTitle, titleTokens, keyword));
+  if (matchedExcludedKeyword) reasons.push(`Excluded title keyword: ${matchedExcludedKeyword.original}`);
   else if (SENIOR_TITLE.test(job.title)) reasons.push("Clearly senior title");
 
   const employmentType = job.employmentType?.trim() ?? "";
