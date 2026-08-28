@@ -11,6 +11,7 @@
     "start": "next start",
     "test": "npm run build && node --test tests/app-source.test.mjs",
     "test:discovery": "node --experimental-strip-types --test tests/discovery-*.test.ts",
+    "test:source-first": "npm run test:discovery && node --test tests/discovery-*.test.mjs tests/settings-function-list.test.mjs",
     "lint": "eslint . --ignore-pattern .next --ignore-pattern .vercel --ignore-pattern dist --ignore-pattern .sites-runtime --ignore-pattern .wrangler"
   },
   "dependencies": {
