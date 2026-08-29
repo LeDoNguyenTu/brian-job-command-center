@@ -6,8 +6,8 @@ const entrypoint = readFileSync(new URL('../supabase/functions/discover-jobs/ind
 const orchestrator = readFileSync(new URL('../supabase/functions/discover-jobs/orchestrator.ts', import.meta.url), 'utf8');
 const source = `${entrypoint}\n${orchestrator}`;
 
-test('entrypoint stays small and delegates to the orchestrator', () => {
-  assert.match(entrypoint, /handleDiscoveryRequest/);
+test('entrypoint stays small and delegates to the discovery handler', () => {
+  assert.match(entrypoint, /handleDiscovery(?:Entrypoint|Request)/);
   assert.ok(entrypoint.split('\n').length <= 8);
 });
 
