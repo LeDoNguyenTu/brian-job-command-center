@@ -4,14 +4,17 @@ import { useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 
 const MANUAL_SCAN_POLL_MS = 15_000;
-const MANUAL_SCAN_MAX_POLLS = 120;
+const MANUAL_SCAN_MAX_POLLS = 480;
 const MANUAL_SCAN_QUEUE_GRACE_POLLS = 5;
+const MANUAL_SCAN_STARTED_KEY = "brian-manual-scan-started-at";
+const MANUAL_SCAN_LAST_JOB_KEY = "brian-manual-scan-last-job-id";
 
 export default function SourceFirstUiEnhancer() {
   useEffect(() => {
     let manualScanTimer = 0;
     let manualScanPolls = 0;
-    let manualScanStartedAt = "";
+    let manualScanStartedAt = sessionStorage.getItem(MANUAL_SCAN_STARTED_KEY) ?? "";
+    let manualScanLastJobId = sessionStorage.getItem(MANUAL_SCAN_LAST_JOB_KEY) ?? "";
 
     const update = () => {
       const scoutTitle = document.querySelector<HTMLElement>(".scout-card .scout-header p");
@@ -34,12 +37,19 @@ export default function SourceFirstUiEnhancer() {
     };
 
     const scanStatusElement = () => document.querySelector<HTMLElement>(".discovery-message");
-
-    const stopManualScanMonitor = () => {
+    const clearManualScanTimer = () => {
       if (manualScanTimer) window.clearTimeout(manualScanTimer);
       manualScanTimer = 0;
+    };
+    const stopManualScanMonitor = (clearSession = true) => {
+      clearManualScanTimer();
       manualScanPolls = 0;
       manualScanStartedAt = "";
+      manualScanLastJobId = "";
+      if (clearSession) {
+        sessionStorage.removeItem(MANUAL_SCAN_STARTED_KEY);
+        sessionStorage.removeItem(MANUAL_SCAN_LAST_JOB_KEY);
+      }
     };
 
     const pollManualScan = async () => {
@@ -76,8 +86,11 @@ export default function SourceFirstUiEnhancer() {
             : "Manual full-registry scan completed. No additional trusted matches have appeared yet under the current filters.";
       }
 
-      if ((jobsResult.data?.length ?? 0) > 0) {
-        stopManualScanMonitor();
+      const newestJobId = jobsResult.data?.[0]?.id ? String(jobsResult.data[0].id) : "";
+      if (newestJobId && newestJobId !== manualScanLastJobId) {
+        manualScanLastJobId = newestJobId;
+        sessionStorage.setItem(MANUAL_SCAN_LAST_JOB_KEY, newestJobId);
+        clearManualScanTimer();
         window.location.reload();
         return;
       }
@@ -94,6 +107,9 @@ export default function SourceFirstUiEnhancer() {
       if (!button || button.textContent?.trim() !== "Fetch now") return;
       stopManualScanMonitor();
       manualScanStartedAt = new Date().toISOString();
+      manualScanLastJobId = "";
+      sessionStorage.setItem(MANUAL_SCAN_STARTED_KEY, manualScanStartedAt);
+      sessionStorage.removeItem(MANUAL_SCAN_LAST_JOB_KEY);
       manualScanTimer = window.setTimeout(() => void pollManualScan(), 2_000);
     };
 
@@ -101,10 +117,11 @@ export default function SourceFirstUiEnhancer() {
     observer.observe(document.body, { childList: true, subtree: true });
     document.addEventListener("click", onClick);
     update();
+    if (manualScanStartedAt) manualScanTimer = window.setTimeout(() => void pollManualScan(), 2_000);
     return () => {
       observer.disconnect();
       document.removeEventListener("click", onClick);
-      stopManualScanMonitor();
+      clearManualScanTimer();
     };
   }, []);
 
