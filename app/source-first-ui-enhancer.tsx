@@ -32,6 +32,8 @@ export default function SourceFirstUiEnhancer() {
       }
     };
 
+    const scanStatusElement = () => document.querySelector<HTMLElement>(".discovery-message");
+
     const stopManualScanMonitor = () => {
       if (manualScanTimer) window.clearTimeout(manualScanTimer);
       manualScanTimer = 0;
@@ -45,12 +47,13 @@ export default function SourceFirstUiEnhancer() {
         return;
       }
       manualScanPolls += 1;
+      const now = new Date().toISOString();
 
-      const [settingsResult, jobsResult] = await Promise.all([
-        supabase.from("app_settings")
-          .select("discovery_message")
-          .eq("id", 1)
-          .maybeSingle(),
+      const [sourcesResult, jobsResult] = await Promise.all([
+        supabase.from("discovery_sources")
+          .select("id", { count: "exact", head: true })
+          .eq("enabled", true)
+          .lte("next_crawl_at", now),
         supabase.from("jobs")
           .select("id, created_at")
           .gte("created_at", manualScanStartedAt)
@@ -61,15 +64,21 @@ export default function SourceFirstUiEnhancer() {
           .limit(1),
       ]);
 
-      const backendMessage = settingsResult.data?.discovery_message;
-      if (typeof backendMessage === "string" && backendMessage.startsWith("Manual full-registry scan")) {
-        const status = document.querySelector<HTMLElement>(".discovery-message");
-        if (status) status.textContent = backendMessage;
+      const queuedSources = sourcesResult.count ?? 0;
+      const status = scanStatusElement();
+      if (status && !sourcesResult.error) {
+        status.textContent = queuedSources > 0
+          ? `Manual full-registry scan is running. ${queuedSources} enabled source${queuedSources === 1 ? " remains" : "s remain"} queued for safe crawling. New trusted matches will appear automatically.`
+          : "Manual full-registry scan completed. No additional trusted matches have appeared yet under the current filters.";
       }
 
       if ((jobsResult.data?.length ?? 0) > 0) {
         stopManualScanMonitor();
         window.location.reload();
+        return;
+      }
+      if (!sourcesResult.error && queuedSources === 0 && manualScanPolls > 1) {
+        stopManualScanMonitor();
         return;
       }
 
