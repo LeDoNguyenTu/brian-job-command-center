@@ -6,7 +6,7 @@ const source = fs.readFileSync('supabase/functions/discover-jobs/index.ts', 'utf
 
 test('authenticated manual fetch queues the remaining enabled source registry safely', () => {
   assert.match(source, /request\.clone\(\)\.json\(\)/);
-  assert.match(source, /action\s*===\s*['"]manual['"]/);
+  assert.match(source, /requestedAction\s*!==\s*['"]manual['"]/);
   assert.match(source, /handleDiscoveryRequest\(request\)/);
   assert.match(source, /discovery_sources/);
   assert.match(source, /\.eq\(['"]enabled['"],\s*true\)/);
@@ -16,6 +16,7 @@ test('authenticated manual fetch queues the remaining enabled source registry sa
 
 test('manual queueing happens only after the orchestrator accepted the request', () => {
   const handled = source.indexOf('handleDiscoveryRequest(request)');
-  const queue = source.indexOf("from('discovery_sources')");
-  assert.ok(handled >= 0 && queue > handled, 'manual queue must happen after orchestrator authorization/success');
+  const queueCall = source.indexOf('queueRemainingManualSources(body)');
+  assert.ok(handled >= 0 && queueCall > handled, 'manual queue must happen after orchestrator authorization/success');
+  assert.match(source, /requestedAction !== 'manual' \|\| !response\.ok/);
 });
