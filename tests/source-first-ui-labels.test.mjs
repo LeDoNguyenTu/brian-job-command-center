@@ -23,5 +23,7 @@ test("manual full-registry scans surface progress and refresh when a new trusted
   assert.match(source, /created_at/);
   assert.match(source, /availability_status/);
   assert.match(source, /verified_open/);
+  assert.match(source, /sessionStorage/);
+  assert.match(source, /manualScanLastJobId/);
   assert.match(source, /window\.location\.reload\(\)/);
 });
