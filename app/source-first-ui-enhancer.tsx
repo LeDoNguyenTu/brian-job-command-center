@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 
 const MANUAL_SCAN_POLL_MS = 15_000;
 const MANUAL_SCAN_MAX_POLLS = 120;
+const MANUAL_SCAN_QUEUE_GRACE_POLLS = 5;
 
 export default function SourceFirstUiEnhancer() {
   useEffect(() => {
@@ -65,11 +66,14 @@ export default function SourceFirstUiEnhancer() {
       ]);
 
       const queuedSources = sourcesResult.count ?? 0;
+      const preparing = queuedSources === 0 && manualScanPolls < MANUAL_SCAN_QUEUE_GRACE_POLLS;
       const status = scanStatusElement();
       if (status && !sourcesResult.error) {
         status.textContent = queuedSources > 0
           ? `Manual full-registry scan is running. ${queuedSources} enabled source${queuedSources === 1 ? " remains" : "s remain"} queued for safe crawling. New trusted matches will appear automatically.`
-          : "Manual full-registry scan completed. No additional trusted matches have appeared yet under the current filters.";
+          : preparing
+            ? "Preparing the manual full-registry scan and learning any new trusted source roots..."
+            : "Manual full-registry scan completed. No additional trusted matches have appeared yet under the current filters.";
       }
 
       if ((jobsResult.data?.length ?? 0) > 0) {
@@ -77,7 +81,7 @@ export default function SourceFirstUiEnhancer() {
         window.location.reload();
         return;
       }
-      if (!sourcesResult.error && queuedSources === 0 && manualScanPolls > 1) {
+      if (!sourcesResult.error && queuedSources === 0 && !preparing) {
         stopManualScanMonitor();
         return;
       }
