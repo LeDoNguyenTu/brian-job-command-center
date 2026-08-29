@@ -14,3 +14,13 @@ test("legacy dashboard labels identify the independent source-first scanner", ()
   assert.match(source, /MutationObserver/);
   assert.match(layout, /<SourceFirstUiEnhancer \/>/);
 });
+
+test("manual full-registry scans surface progress and refresh when a new trusted job arrives", () => {
+  assert.match(source, /Fetch now/);
+  assert.match(source, /discovery_message/);
+  assert.match(source, /Manual full-registry scan/);
+  assert.match(source, /created_at/);
+  assert.match(source, /availability_status/);
+  assert.match(source, /verified_open/);
+  assert.match(source, /window\.location\.reload\(\)/);
+});
