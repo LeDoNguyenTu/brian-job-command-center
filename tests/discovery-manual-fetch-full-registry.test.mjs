@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const source = fs.readFileSync('supabase/functions/discover-jobs/index.ts', 'utf8');
+const source = fs.readFileSync('supabase/functions/discover-jobs/manual-fetch-wrapper.ts', 'utf8');
 
 test('authenticated manual fetch queues the remaining enabled source registry safely', () => {
   assert.match(source, /request\.clone\(\)\.json\(\)/);
