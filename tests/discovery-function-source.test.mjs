@@ -6,9 +6,9 @@ const entrypoint = readFileSync(new URL('../supabase/functions/discover-jobs/ind
 const orchestrator = readFileSync(new URL('../supabase/functions/discover-jobs/orchestrator.ts', import.meta.url), 'utf8');
 const source = `${entrypoint}\n${orchestrator}`;
 
-test('keeps the Edge entrypoint small and delegates orchestration', () => {
-  assert.match(entrypoint, /handleDiscoveryRequest/);
-  assert.match(entrypoint, /Deno\.serve\(handleDiscoveryRequest\)/);
+test('keeps the Edge entrypoint small and delegates discovery handling', () => {
+  assert.match(entrypoint, /handleDiscovery(?:Entrypoint|Request)/);
+  assert.match(entrypoint, /Deno\.serve\(handleDiscovery(?:Entrypoint|Request)\)/);
   assert.ok(entrypoint.length < 1000);
 });
 
