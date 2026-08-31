@@ -31,7 +31,7 @@ yarn-error.log*
 .env*
 !.env.example
 
-# Vercel local project state
+# Vercel local project metadata
 .vercel
 
 # typescript
